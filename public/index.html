@@ -1,34 +1,50 @@
 <!DOCTYPE html>
-<html><head><title>Trading Bot Dashboard</title>
+<html><head><title>MetaApi Trading Bot</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: -apple-system, sans-serif; background:#0f172a; color:#e2e8f0; padding:20px; }
 .header { text-align:center; padding:20px 0; }
 .header h1 { color:#38bdf8; font-size:28px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:20px; margin-top:20px; }
+.header-btns { margin-top:10px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:20px; margin-top:20px; }
 .card { background:#1e293b; border-radius:12px; padding:20px; border:1px solid #334155; }
-.card h2 { color:#38bdf8; margin-bottom:15px; font-size:18px; }
+.card h2 { color:#38bdf8; margin-bottom:15px; font-size:18px; display:flex; justify-content:space-between; align-items:center; }
 .stat { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155; }
 .stat-label { color:#94a3b8; }
 .stat-value { color:#f1f5f9; font-weight:bold; }
 .profit { color:#4ade80; } .loss { color:#f87171; }
-button { background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-size:14px; margin:5px; }
-button:hover { background:#1d4ed8; }
-.sell-btn { background:#dc2626; } .sell-btn:hover { background:#b91c1c; }
-select, input { background:#0f172a; color:#e2e8f0; border:1px solid #475569; padding:8px 12px; border-radius:6px; margin:4px; }
-.trade-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-#positions-list, #orders-list { max-height:300px; overflow-y:auto; }
+.btn { background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:8px; cursor:pointer; font-size:14px; margin:4px; display:inline-block; }
+.btn:hover { background:#1d4ed8; }
+.btn-sm { padding:6px 14px; font-size:12px; }
+.btn-success { background:#16a34a; } .btn-success:hover { background:#15803d; }
+.btn-danger { background:#dc2626; } .btn-danger:hover { background:#b91c1c; }
+.btn-warning { background:#d97706; } .btn-warning:hover { background:#b45309; }
+.btn-secondary { background:#475569; } .btn-secondary:hover { background:#334155; }
+.btn-info { background:#0891b2; } .btn-info:hover { background:#0e7490; }
+select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0; border:1px solid #475569; padding:8px 12px; border-radius:6px; margin:4px; font-size:14px; }
+.trade-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.trade-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.price-display { background:#0f172a; padding:12px; border-radius:8px; margin:10px 0; text-align:center; }
+.price-bid { color:#4ade80; font-size:20px; font-weight:bold; }
+.price-ask { color:#f87171; font-size:20px; font-weight:bold; }
+.price-spread { color:#94a3b8; font-size:12px; }
+#positions-list, #orders-list, #history-list { max-height:300px; overflow-y:auto; }
 .pos-item { background:#0f172a; padding:10px; border-radius:8px; margin:8px 0; display:flex; justify-content:space-between; align-items:center; }
 .status { padding:4px 12px; border-radius:20px; font-size:12px; }
 .status.connected { background:#065f46; color:#6ee7b7; }
 .status.disconnected { background:#7f1d1d; color:#fca5a5; }
 #log { background:#020617; padding:10px; border-radius:8px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:12px; margin-top:10px; }
+.quick-trade { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
 </style></head><body>
 <div class="header">
   <h1>MetaApi Trading Bot</h1>
   <p>MT5 Account Dashboard</p>
   <span id="conn-status" class="status disconnected">Connecting...</span>
+  <div class="header-btns">
+    <button class="btn btn-secondary btn-sm" onclick="refreshAll()">Refresh All</button>
+    <button class="btn btn-info btn-sm" onclick="getPrice()">Get Price</button>
+  </div>
 </div>
 <div class="grid">
   <div class="card">
@@ -36,31 +52,68 @@ select, input { background:#0f172a; color:#e2e8f0; border:1px solid #475569; pad
     <div id="account-info"><p>Loading...</p></div>
   </div>
   <div class="card">
+    <h2>Live Price</h2>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+      <select id="price-symbol" style="flex:1"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>XAUUSD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option></select>
+      <button class="btn btn-info btn-sm" onclick="getPrice()">Refresh Price</button>
+    </div>
+    <div id="price-display" class="price-display">
+      <p style="color:#64748b">Select symbol and click Refresh Price</p>
+    </div>
+    <div class="quick-trade">
+      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.01)">Quick Buy 0.01</button>
+      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.01)">Quick Sell 0.01</button>
+      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.1)">Quick Buy 0.1</button>
+      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.1)">Quick Sell 0.1</button>
+    </div>
+  </div>
+  <div class="card">
     <h2>Place Trade</h2>
     <div class="trade-form">
       <select id="symbol"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>XAUUSD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option></select>
-      <input id="volume" type="number" value="0.01" step="0.01" min="0.01" style="width:80px" placeholder="Lots">
-      <input id="sl" type="number" placeholder="SL" style="width:80px">
-      <input id="tp" type="number" placeholder="TP" style="width:80px">
-      <button onclick="placeTrade('buy')">BUY</button>
-      <button onclick="placeTrade('sell')" class="sell-btn">SELL</button>
+      <input id="volume" type="number" value="0.01" step="0.01" min="0.01" style="width:90px" placeholder="Lots">
+    </div>
+    <div class="trade-row">
+      <input id="sl" type="number" placeholder="Stop Loss" style="width:120px">
+      <input id="tp" type="number" placeholder="Take Profit" style="width:120px">
+    </div>
+    <div class="trade-row">
+      <button class="btn btn-success" onclick="placeTrade('buy')">BUY</button>
+      <button class="btn btn-danger" onclick="placeTrade('sell')">SELL</button>
+    </div>
+    <div class="trade-row">
+      <button class="btn btn-success btn-sm" onclick="placeTrade('buy',0.05)">Buy 0.05</button>
+      <button class="btn btn-success btn-sm" onclick="placeTrade('buy',0.1)">Buy 0.1</button>
+      <button class="btn btn-danger btn-sm" onclick="placeTrade('sell',0.05)">Sell 0.05</button>
+      <button class="btn btn-danger btn-sm" onclick="placeTrade('sell',0.1)">Sell 0.1</button>
     </div>
     <div id="trade-result" style="margin-top:10px"></div>
   </div>
   <div class="card">
-    <h2>Open Positions <button onclick="closeAllPositions()" class="sell-btn" style="font-size:11px;padding:4px 10px">Close All</button></h2>
+    <h2>Open Positions
+      <span>
+        <button class="btn btn-warning btn-sm" onclick="closeAllPositions()">Close All</button>
+        <button class="btn btn-secondary btn-sm" onclick="fetchPositions()">Refresh</button>
+      </span>
+    </h2>
     <div id="positions-list"><p>Loading...</p></div>
   </div>
   <div class="card">
-    <h2>Pending Orders</h2>
+    <h2>Pending Orders
+      <button class="btn btn-secondary btn-sm" onclick="fetchOrders()">Refresh</button>
+    </h2>
     <div id="orders-list"><p>Loading...</p></div>
   </div>
   <div class="card">
-    <h2>Recent Deals (7d)</h2>
+    <h2>Recent Deals (7d)
+      <button class="btn btn-secondary btn-sm" onclick="fetchHistory()">Refresh</button>
+    </h2>
     <div id="history-list"><p>Loading...</p></div>
   </div>
   <div class="card">
-    <h2>Activity Log</h2>
+    <h2>Activity Log
+      <button class="btn btn-secondary btn-sm" onclick="clearLog()">Clear</button>
+    </h2>
     <div id="log"></div>
   </div>
 </div>
@@ -69,6 +122,26 @@ var BASE = '';
 function log(msg) {
   var el = document.getElementById('log');
   el.innerHTML = new Date().toLocaleTimeString() + ' - ' + msg + '<br>' + el.innerHTML;
+}
+function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+function refreshAll() {
+  log('Refreshing all data...');
+  fetchAccount(); fetchPositions(); fetchOrders(); fetchHistory();
+}
+
+function getPrice() {
+  var sym = document.getElementById('price-symbol').value;
+  log('Getting price for ' + sym + '...');
+  fetch(BASE + '/api/price/' + sym).then(function(r){return r.json()}).then(function(d){
+    if (d.error) { log('Price error: ' + d.error); return; }
+    var spread = d.ask && d.bid ? ((d.ask - d.bid) * 100000).toFixed(1) : '?';
+    document.getElementById('price-display').innerHTML =
+      '<div><span class="price-bid">Bid: ' + (d.bid || 'N/A') + '</span></div>' +
+      '<div><span class="price-ask">Ask: ' + (d.ask || 'N/A') + '</span></div>' +
+      '<div class="price-spread">Spread: ' + spread + ' pts | ' + sym + '</div>';
+    log(sym + ' Bid:' + d.bid + ' Ask:' + d.ask);
+  }).catch(function(e){ log('Price error: ' + e.message); });
 }
 
 function fetchAccount() {
@@ -83,7 +156,8 @@ function fetchAccount() {
       '<div class="stat"><span class="stat-label">P&L</span><span class="stat-value ' + pClass + '">$' + (d.profit || 0).toFixed(2) + '</span></div>' +
       '<div class="stat"><span class="stat-label">Margin</span><span class="stat-value">$' + (d.margin || 0).toFixed(2) + '</span></div>' +
       '<div class="stat"><span class="stat-label">Free Margin</span><span class="stat-value">$' + (d.freeMargin || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat"><span class="stat-label">Leverage</span><span class="stat-value">1:' + d.leverage + '</span></div>';
+      '<div class="stat"><span class="stat-label">Leverage</span><span class="stat-value">1:' + d.leverage + '</span></div>' +
+      '<div class="stat"><span class="stat-label">Server</span><span class="stat-value">' + (d.server || '') + '</span></div>';
     log('Account loaded - Balance: $' + (d.balance || 0).toFixed(2));
   }).catch(function(e){ log('Fetch error: ' + e.message); });
 }
@@ -95,8 +169,9 @@ function fetchPositions() {
     if (!d.length) { el.innerHTML = '<p style="color:#64748b">No open positions</p>'; return; }
     el.innerHTML = d.map(function(p){
       var pClass = (p.profit >= 0) ? 'profit' : 'loss';
-      return '<div class="pos-item"><div><strong>' + p.symbol + '</strong> ' + p.type + ' ' + p.volume + ' lots<br><span class="' + pClass + '">$' + (p.profit || 0).toFixed(2) + '</span></div><button onclick="closePos(\'' + p.id + '\')" class="sell-btn" style="font-size:11px;padding:4px 10px">Close</button></div>';
+      return '<div class="pos-item"><div><strong>' + p.symbol + '</strong> ' + p.type + ' ' + p.volume + ' lots<br><span class="' + pClass + '">$' + (p.profit || 0).toFixed(2) + '</span></div><button class="btn btn-danger btn-sm" onclick="closePos(\'' + p.id + '\')" >Close</button></div>';
     }).join('');
+    log('Positions loaded: ' + d.length + ' open');
   }).catch(function(e){});
 }
 
@@ -114,13 +189,13 @@ function fetchHistory() {
     if (d.error) return;
     var el = document.getElementById('history-list');
     if (!d.length) { el.innerHTML = '<p style="color:#64748b">No recent deals</p>'; return; }
-    el.innerHTML = d.slice(0,20).map(function(h){ return '<div class="pos-item"><div><strong>' + h.symbol + '</strong> ' + h.type + '<br><span class="' + ((h.profit >= 0) ? 'profit' : 'loss') + '">$' + (h.profit || 0).toFixed(2) + '</span></div></div>'; }).join('');
+    el.innerHTML = d.slice(0,20).map(function(h){ return '<div class="pos-item"><div><strong>' + (h.symbol||'') + '</strong> ' + (h.type||'') + '<br><span class="' + ((h.profit >= 0) ? 'profit' : 'loss') + '">$' + (h.profit || 0).toFixed(2) + '</span></div></div>'; }).join('');
   }).catch(function(e){});
 }
 
-function placeTrade(type) {
+function placeTrade(type, vol) {
   var symbol = document.getElementById('symbol').value;
-  var volume = parseFloat(document.getElementById('volume').value);
+  var volume = vol || parseFloat(document.getElementById('volume').value);
   var sl = parseFloat(document.getElementById('sl').value) || undefined;
   var tp = parseFloat(document.getElementById('tp').value) || undefined;
   log('Placing ' + type.toUpperCase() + ' ' + volume + ' ' + symbol + '...');
@@ -129,8 +204,21 @@ function placeTrade(type) {
     body: JSON.stringify({ symbol: symbol, type: type, volume: volume, stopLoss: sl, takeProfit: tp })
   }).then(function(r){return r.json()}).then(function(d){
     if (d.error) { log('Trade error: ' + d.error); document.getElementById('trade-result').innerHTML = '<span class="loss">' + d.error + '</span>'; return; }
-    log('Trade executed!');
+    log('Trade executed: ' + type.toUpperCase() + ' ' + volume + ' ' + symbol);
     document.getElementById('trade-result').innerHTML = '<span class="profit">Order placed!</span>';
+    setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
+  }).catch(function(e){ log('Trade error: ' + e.message); });
+}
+
+function quickTrade(type, vol) {
+  var symbol = document.getElementById('price-symbol').value;
+  log('Quick ' + type.toUpperCase() + ' ' + vol + ' ' + symbol + '...');
+  fetch(BASE + '/api/trade', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ symbol: symbol, type: type, volume: vol })
+  }).then(function(r){return r.json()}).then(function(d){
+    if (d.error) { log('Trade error: ' + d.error); return; }
+    log('Quick trade executed: ' + type.toUpperCase() + ' ' + vol + ' ' + symbol);
     setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
   }).catch(function(e){ log('Trade error: ' + e.message); });
 }
