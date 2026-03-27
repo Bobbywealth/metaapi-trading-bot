@@ -11,21 +11,32 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// ===== API KEYS =====
-const API_KEYS_FILE = path.join(__dirname, 'api-keys.json');
+// ===== API KEYS — PERSISTENT STORAGE =====
+// Primary: /var/data (persistent disk on paid Render plans)
+// Fallback: /tmp (ephemeral — wiped on free tier redeploys)
+const PERSIST_DIR = (() => {
+  // Check if /var/data is writable (paid tier with disk)
+  try { fs.mkdirSync('/var/data', { recursive: true }); return '/var/data'; } catch(e) {}
+  return '/tmp';
+})();
+
+const API_KEYS_FILE = path.join(PERSIST_DIR, 'api-keys.json');
 const API_KEY_PREFIX = 'mtrd_';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || null; // Set in Render env vars
 
 function loadApiKeys() {
   try {
     if (fs.existsSync(API_KEYS_FILE)) {
       return JSON.parse(fs.readFileSync(API_KEYS_FILE, 'utf8'));
     }
-  } catch(e) {}
+  } catch(e) { console.log('loadApiKeys error:', e.message); }
   return [];
 }
 
 function saveApiKeys(keys) {
-  fs.writeFileSync(API_KEYS_FILE, JSON.stringify(keys, null, 2));
+  try {
+    fs.writeFileSync(API_KEYS_FILE, JSON.stringify(keys, null, 2));
+  } catch(e) { console.log('saveApiKeys error:', e.message); }
 }
 
 function generateApiKey() {
@@ -53,6 +64,23 @@ function requireApiKey(req, res, next) {
   next();
 }
 
+// Middleware: require admin password for key management (protects /api/keys)
+// Must pass X-Admin-Password header
+function requireAdmin(req, res, next) {
+  // If no ADMIN_PASSWORD set, block all key management for security
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).json({
+      error: 'Key management disabled. Set ADMIN_PASSWORD env var on Render to enable.',
+      hint: 'Go to Render dashboard → Environment → Add ADMIN_PASSWORD'
+    });
+  }
+  const adminPw = req.headers['x-admin-password'];
+  if (!adminPw || adminPw !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid admin password.' });
+  }
+  next();
+}
+
 // ===== METAAPI STATE =====
 let metaApi = null;
 let account = null;
@@ -64,7 +92,7 @@ let connected = false;
 
 // In-memory journal
 let journalEntries = [];
-const JOURNAL_FILE = process.env.JOURNAL_FILE || '/tmp/trades-journal.json';
+const JOURNAL_FILE = process.env.JOURNAL_FILE || path.join(PERSIST_DIR, 'trades-journal.json');
 
 // ===== JOURNAL PERSISTENCE =====
 function loadJournal() {
@@ -123,11 +151,11 @@ async function initMetaApi(token, accountId) {
 }
 
 // ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// API KEY MANAGEMENT (admin — no auth required to prevent lockout)
+// API KEY MANAGEMENT (requires X-Admin-Password header)
 // ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // List all API keys (masked — never shows the actual key after creation)
-app.get('/api/keys', (req, res) => {
+app.get('/api/keys', requireAdmin, (req, res) => {
   const keys = loadApiKeys();
   res.json(keys.map(k => ({
     id: k.id,
@@ -143,7 +171,7 @@ app.get('/api/keys', (req, res) => {
 });
 
 // Create new API key
-app.post('/api/keys', (req, res) => {
+app.post('/api/keys', requireAdmin, (req, res) => {
   const { label, permissions } = req.body;
   if (!label) return res.status(400).json({ error: 'label is required' });
 
@@ -176,7 +204,7 @@ app.post('/api/keys', (req, res) => {
 });
 
 // Update API key (label, active, permissions)
-app.patch('/api/keys/:id', (req, res) => {
+app.patch('/api/keys/:id', requireAdmin, (req, res) => {
   const keys = loadApiKeys();
   const idx = keys.findIndex(k => k.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Key not found' });
@@ -191,7 +219,7 @@ app.patch('/api/keys/:id', (req, res) => {
 });
 
 // Delete API key
-app.delete('/api/keys/:id', (req, res) => {
+app.delete('/api/keys/:id', requireAdmin, (req, res) => {
   const keys = loadApiKeys();
   const idx = keys.findIndex(k => k.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Key not found' });
@@ -202,7 +230,7 @@ app.delete('/api/keys/:id', (req, res) => {
 });
 
 // Revoke all keys (emergency)
-app.delete('/api/keys', (req, res) => {
+app.delete('/api/keys', requireAdmin, (req, res) => {
   const count = loadApiKeys().length;
   saveApiKeys([]);
   res.json({ success: true, revoked: count });
@@ -874,7 +902,7 @@ app.get('/api/config-status', requireApiKey, (req, res) => {
 });
 
 // ===== EVENT LOG =====
-const EVENT_LOG_FILE = path.join(__dirname, 'api-events.log');
+const EVENT_LOG_FILE = path.join(PERSIST_DIR, 'api-events.log');
 function logApiEvent(event, keyId, message) {
   const line = `[${new Date().toISOString()}] [${event}] [key:${keyId}] ${message}\n`;
   fs.appendFile(EVENT_LOG_FILE, line, () => {});

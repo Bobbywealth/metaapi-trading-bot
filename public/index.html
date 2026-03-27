@@ -314,8 +314,37 @@ function closeApiKeysModal() {
   document.getElementById('new-key-result').style.display = 'none';
 }
 
+var ADMIN_PASSWORD = localStorage.getItem('admin_pw') || '';
+var pendingAdminAction = null; // queue action while prompting
+
+function getAdminHeader() {
+  return { 'x-admin-password': ADMIN_PASSWORD };
+}
+
+function openApiKeysModal() {
+  // Prompt for admin password if not set
+  if (!ADMIN_PASSWORD) {
+    var pw = prompt('Enter admin password to manage API keys:');
+    if (!pw) return;
+    ADMIN_PASSWORD = pw;
+    localStorage.setItem('admin_pw', pw);
+  }
+  document.getElementById('apikeys-modal').classList.add('open');
+  document.getElementById('new-key-result').style.display = 'none';
+  document.getElementById('new-key-label').value = '';
+  loadApiKeys();
+}
+
 function loadApiKeys() {
-  fetch(BASE + '/api/keys').then(function(r){ return r.json(); }).then(function(keys){
+  fetch(BASE + '/api/keys', { headers: getAdminHeader() }).then(function(r){
+    if (r.status === 401 || r.status === 503) {
+      ADMIN_PASSWORD = '';
+      localStorage.removeItem('admin_pw');
+      document.getElementById('api-keys-list').innerHTML = '<p style="color:#f87171;font-size:13px">Auth required. Refresh and re-enter password.</p>';
+      return;
+    }
+    return r.json();
+  }).then(function(keys){
     var el = document.getElementById('api-keys-list');
     if (!keys || keys.length === 0) {
       el.innerHTML = '<p style="color:#64748b;font-size:13px">No API keys yet. Create one above.</p>';
@@ -348,9 +377,12 @@ function createApiKey() {
   if (!label) { alert('Enter a label for this key'); return; }
   fetch(BASE + '/api/keys', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: Object.assign({ 'Content-Type':'application/json' }, getAdminHeader()),
     body: JSON.stringify({ label: label, permissions: ['read','trade','journal'] })
-  }).then(function(r){ return r.json(); }).then(function(data){
+  }).then(function(r){
+    if (r.status === 401 || r.status === 503) { alert('Admin auth failed. Refresh and try again.'); return null; }
+    return r.json();
+  }).then(function(data){
     if (data.error) { alert('Error: ' + data.error); return; }
     newKeyJustCreated = data.key;
     document.getElementById('new-key-value').textContent = data.key;
@@ -372,9 +404,12 @@ function copyNewKey() {
 function toggleKey(id, activate) {
   fetch(BASE + '/api/keys/' + id, {
     method: 'PATCH',
-    headers: {'Content-Type':'application/json'},
+    headers: Object.assign({ 'Content-Type':'application/json' }, getAdminHeader()),
     body: JSON.stringify({ active: activate })
-  }).then(function(r){ return r.json(); }).then(function(){
+  }).then(function(r){
+    if (r.status === 401 || r.status === 503) { alert('Auth required. Refresh.'); return null; }
+    return r.json();
+  }).then(function(){
     log('API key ' + (activate ? 'activated' : 'revoked'));
     loadApiKeys();
   }).catch(function(e){ alert('Error: ' + e.message); });
@@ -382,7 +417,10 @@ function toggleKey(id, activate) {
 
 function deleteKey(id) {
   if (!confirm('Delete this API key permanently?')) return;
-  fetch(BASE + '/api/keys/' + id, { method: 'DELETE' }).then(function(r){ return r.json(); }).then(function(){
+  fetch(BASE + '/api/keys/' + id, { method: 'DELETE', headers: getAdminHeader() }).then(function(r){
+    if (r.status === 401 || r.status === 503) { alert('Auth required.'); return null; }
+    return r.json();
+  }).then(function(){
     log('API key deleted');
     loadApiKeys();
   }).catch(function(e){ alert('Error: ' + e.message); });
@@ -390,7 +428,10 @@ function deleteKey(id) {
 
 function revokeAllKeys() {
   if (!confirm('Revoke ALL API keys? External apps will lose access immediately.')) return;
-  fetch(BASE + '/api/keys', { method: 'DELETE' }).then(function(r){ return r.json(); }).then(function(data){
+  fetch(BASE + '/api/keys', { method: 'DELETE', headers: getAdminHeader() }).then(function(r){
+    if (r.status === 401 || r.status === 503) { alert('Auth required.'); return null; }
+    return r.json();
+  }).then(function(data){
     log('All ' + (data.revoked||0) + ' API keys revoked');
     loadApiKeys();
   }).catch(function(e){ alert('Error: ' + e.message); });
