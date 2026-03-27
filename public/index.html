@@ -22,7 +22,10 @@ body { font-family: -apple-system, sans-serif; background:#0f172a; color:#e2e8f0
 .btn-warning { background:#d97706; } .btn-warning:hover { background:#b45309; }
 .btn-secondary { background:#475569; } .btn-secondary:hover { background:#334155; }
 .btn-info { background:#0891b2; } .btn-info:hover { background:#0e7490; }
-select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0; border:1px solid #475569; padding:8px 12px; border-radius:6px; margin:4px; font-size:14px; }
+.btn-ghost { background:transparent; border:1px solid #334155; color:#94a3b8; } .btn-ghost:hover { background:#334155; color:#e2e8f0; }
+select, input[type=number], input[type=text], input[type=password] { background:#0f172a; color:#e2e8f0; border:1px solid #475569; padding:8px 12px; border-radius:6px; margin:4px; font-size:14px; width:100%; }
+select { width:auto; }
+input:focus { outline:none; border-color:#38bdf8; }
 .trade-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .trade-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .price-display { background:#0f172a; padding:12px; border-radius:8px; margin:10px 0; text-align:center; }
@@ -31,16 +34,90 @@ select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0
 .price-spread { color:#94a3b8; font-size:12px; }
 #positions-list, #orders-list, #history-list { max-height:300px; overflow-y:auto; }
 .pos-item { background:#0f172a; padding:10px; border-radius:8px; margin:8px 0; display:flex; justify-content:space-between; align-items:center; }
-.status { padding:4px 12px; border-radius:20px; font-size:12px; }
+.status { padding:4px 12px; border-radius:20px; font-size:12px; display:inline-block; }
 .status.connected { background:#065f46; color:#6ee7b7; }
 .status.disconnected { background:#7f1d1d; color:#fca5a5; }
+.status.configured { background:#1e3a5f; color:#7dd3fc; }
 #log { background:#020617; padding:10px; border-radius:8px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:12px; margin-top:10px; }
-.quick-trade { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+
+/* Settings Modal */
+.modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000; display:none; }
+.modal-overlay.open { display:flex; }
+.modal { background:#1e293b; border-radius:16px; padding:30px; max-width:500px; width:90%; border:1px solid #334155; }
+.modal h2 { color:#38bdf8; margin-bottom:20px; font-size:22px; }
+.modal h3 { color:#94a3b8; font-size:14px; margin-top:16px; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; }
+.modal p { color:#64748b; font-size:12px; margin-bottom:16px; line-height:1.6; }
+.modal .warning { background:#1c1408; border:1px solid #92400e; border-radius:8px; padding:12px; color:#fbbf24; font-size:12px; margin-bottom:16px; }
+.form-group { margin-bottom:12px; }
+.form-group label { display:block; color:#94a3b8; font-size:12px; margin-bottom:4px; }
+.form-group input { width:100%; }
+.modal-btns { display:flex; gap:10px; margin-top:20px; }
+.key-preview { font-family:monospace; font-size:11px; color:#64748b; margin-top:4px; }
+.btn-copy { background:#334155; padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer; border:none; color:#94a3b8; margin-left:6px; }
+.btn-copy:hover { background:#475569; }
+.saved-badge { background:#065f46; color:#6ee7b7; padding:2px 8px; border-radius:4px; font-size:11px; margin-left:8px; display:none; }
+.key-toggle { background:none; border:none; color:#64748b; cursor:pointer; font-size:12px; padding:2px 6px; }
+.key-toggle:hover { color:#94a3b8; }
+.api-status { display:flex; align-items:center; gap:8px; margin-bottom:12px; padding:10px; background:#0f172a; border-radius:8px; }
+.api-status-dot { width:8px; height:8px; border-radius:50%; }
+.api-status-dot.green { background:#4ade80; }
+.api-status-dot.red { background:#f87171; }
+.api-status-dot.yellow { background:#fbbf24; }
+.api-status-text { font-size:13px; flex:1; }
+.settings-btn { background:#334155; border:none; color:#94a3b8; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+.settings-btn:hover { background:#475569; color:#e2e8f0; }
 </style></head><body>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h2>⚙️ API Configuration</h2>
+    <div class="warning">
+      ⚠️ Keys are stored in your browser's localStorage. Only use on a trusted device.
+    </div>
+
+    <div class="api-status">
+      <div class="api-status-dot" id="meta-status-dot"></div>
+      <div class="api-status-text" id="meta-status-text">Not configured</div>
+      <button class="settings-btn" onclick="clearMetaKeys()">Clear Keys</button>
+    </div>
+
+    <h3>MetaApi Credentials</h3>
+    <p>Get your tokens from <a href="https://app.metaapi.cloud" target="_blank" style="color:#38bdf8">metaapi.cloud → Settings → API Access</a></p>
+
+    <div class="form-group">
+      <label>MetaApi Token</label>
+      <input type="password" id="meta-token" placeholder="eyJhbG..." autocomplete="off" oninput="updateMetaStatus()">
+      <div class="key-preview" id="meta-token-preview"></div>
+    </div>
+
+    <div class="form-group">
+      <label>MT5 Account ID</label>
+      <input type="text" id="meta-account" placeholder="a2b3c4d5-..." autocomplete="off" oninput="updateMetaStatus()">
+    </div>
+
+    <h3>Journal Persistence (Optional)</h3>
+    <p>Store your trade journal in a JSON file on the server instead of memory (resets on redeploy otherwise).</p>
+
+    <div class="form-group">
+      <label>Journal File Path (e.g. /tmp/trades-journal.json)</label>
+      <input type="text" id="journal-path" placeholder="/tmp/trades-journal.json" autocomplete="off">
+    </div>
+
+    <div class="modal-btns">
+      <button class="btn btn-success" onclick="saveSettings()">Save & Connect</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="header">
   <h1>MetaApi Trading Bot</h1>
   <p>MT5 Account Dashboard</p>
-  <span id="conn-status" class="status disconnected">Connecting...</span>
+  <div style="margin-top:8px">
+    <span id="conn-status" class="status disconnected">Not Connected</span>
+    <button class="settings-btn" onclick="openModal()" style="margin-left:8px">⚙️ Settings</button>
+  </div>
   <div class="header-btns">
     <button class="btn btn-secondary btn-sm" onclick="refreshAll()">Refresh All</button>
     <button class="btn btn-info btn-sm" onclick="getPrice()">Get Price</button>
@@ -49,28 +126,28 @@ select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0
 <div class="grid">
   <div class="card">
     <h2>Account Info</h2>
-    <div id="account-info"><p>Loading...</p></div>
+    <div id="account-info"><p style="color:#64748b">Configure API keys in Settings to connect</p></div>
   </div>
   <div class="card">
     <h2>Live Price</h2>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
-      <select id="price-symbol" style="flex:1"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>XAUUSD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option></select>
+      <select id="price-symbol" style="flex:1"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>AUDUSD</option><option>USDCAD</option><option>XAUUSD</option><option>GOLD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option><option>SPX500</option></select>
       <button class="btn btn-info btn-sm" onclick="getPrice()">Refresh Price</button>
     </div>
     <div id="price-display" class="price-display">
       <p style="color:#64748b">Select symbol and click Refresh Price</p>
     </div>
     <div class="quick-trade">
-      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.01)">Quick Buy 0.01</button>
-      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.01)">Quick Sell 0.01</button>
-      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.1)">Quick Buy 0.1</button>
-      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.1)">Quick Sell 0.1</button>
+      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.01)">Buy 0.01</button>
+      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.01)">Sell 0.01</button>
+      <button class="btn btn-success btn-sm" onclick="quickTrade('buy',0.1)">Buy 0.1</button>
+      <button class="btn btn-danger btn-sm" onclick="quickTrade('sell',0.1)">Sell 0.1</button>
     </div>
   </div>
   <div class="card">
     <h2>Place Trade</h2>
     <div class="trade-form">
-      <select id="symbol"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>XAUUSD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option></select>
+      <select id="symbol"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>AUDUSD</option><option>USDCAD</option><option>XAUUSD</option><option>GOLD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option><option>SPX500</option></select>
       <input id="volume" type="number" value="0.01" step="0.01" min="0.01" style="width:90px" placeholder="Lots">
     </div>
     <div class="trade-row">
@@ -96,19 +173,29 @@ select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0
         <button class="btn btn-secondary btn-sm" onclick="fetchPositions()">Refresh</button>
       </span>
     </h2>
-    <div id="positions-list"><p>Loading...</p></div>
+    <div id="positions-list"><p style="color:#64748b">No data — connect first</p></div>
   </div>
   <div class="card">
     <h2>Pending Orders
       <button class="btn btn-secondary btn-sm" onclick="fetchOrders()">Refresh</button>
     </h2>
-    <div id="orders-list"><p>Loading...</p></div>
+    <div id="orders-list"><p style="color:#64748b">No data — connect first</p></div>
   </div>
   <div class="card">
     <h2>Recent Deals (7d)
       <button class="btn btn-secondary btn-sm" onclick="fetchHistory()">Refresh</button>
     </h2>
-    <div id="history-list"><p>Loading...</p></div>
+    <div id="history-list"><p style="color:#64748b">No data — connect first</p></div>
+  </div>
+  <div class="card">
+    <h2>Trade Journal
+      <span style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-secondary btn-sm" onclick="fetchJournal()">Refresh</button>
+        <button class="btn btn-info btn-sm" onclick="openJournalEntry()">+ Add Entry</button>
+      </span>
+    </h2>
+    <div id="journal-stats" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap"></div>
+    <div id="journal-list" style="max-height:200px;overflow-y:auto"><p style="color:#64748b">No journal entries</p></div>
   </div>
   <div class="card">
     <h2>Activity Log
@@ -117,17 +204,231 @@ select, input[type=number], input[type=text] { background:#0f172a; color:#e2e8f0
     <div id="log"></div>
   </div>
 </div>
+
+<!-- Journal Entry Modal -->
+<div class="modal-overlay" id="journal-modal">
+  <div class="modal">
+    <h2>📝 Trade Journal Entry</h2>
+    <div class="form-group">
+      <label>Symbol / Pair</label>
+      <input type="text" id="j-symbol" placeholder="EURUSD">
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div class="form-group" style="flex:1">
+        <label>Type</label>
+        <select id="j-type" style="width:100%"><option value="buy">Buy</option><option value="sell">Sell</option></select>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Volume (lots)</label>
+        <input type="number" id="j-volume" placeholder="0.01" step="0.01" value="0.01">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>P&L ($)</label>
+        <input type="number" id="j-pnl" placeholder="0.00" step="0.01">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Setup / Notes</label>
+      <input type="text" id="j-setup" placeholder="Breakout, trendline, news...">
+    </div>
+    <div class="form-group">
+      <label>Tags (comma separated)</label>
+      <input type="text" id="j-tags" placeholder="scalp, swing, news">
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-success" onclick="submitJournalEntry()">Save Entry</button>
+      <button class="btn btn-ghost" onclick="closeJournalModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var BASE = '';
+var metaToken = '';
+var metaAccount = '';
+var journalPath = '';
+var connected = false;
+
+// ===== SETTINGS =====
+function openModal() {
+  document.getElementById('settings-modal').classList.add('open');
+  // Load saved keys
+  var saved = localStorage.getItem('metaapi_config');
+  if (saved) {
+    var cfg = JSON.parse(saved);
+    document.getElementById('meta-token').value = cfg.token || '';
+    document.getElementById('meta-account').value = cfg.account || '';
+    document.getElementById('journal-path').value = cfg.journalPath || '';
+  }
+  updateMetaStatus();
+}
+
+function closeModal() {
+  document.getElementById('settings-modal').classList.remove('open');
+}
+
+function updateMetaStatus() {
+  var token = document.getElementById('meta-token').value;
+  var account = document.getElementById('meta-account').value;
+  var dot = document.getElementById('meta-status-dot');
+  var text = document.getElementById('meta-status-text');
+  var preview = document.getElementById('meta-token-preview');
+  if (token && account) {
+    dot.className = 'api-status-dot yellow';
+    text.textContent = 'Ready to connect (' + token.substring(0, 8) + '...)';
+    preview.textContent = token.length > 20 ? 'Token: ' + token.substring(0, 20) + '...' : '';
+  } else if (token) {
+    dot.className = 'api-status-dot yellow';
+    text.textContent = 'Token set, add Account ID';
+    preview.textContent = token.substring(0, 30) + '...';
+  } else {
+    dot.className = 'api-status-dot red';
+    text.textContent = 'Not configured';
+    preview.textContent = '';
+  }
+}
+
+function clearMetaKeys() {
+  localStorage.removeItem('metaapi_config');
+  document.getElementById('meta-token').value = '';
+  document.getElementById('meta-account').value = '';
+  document.getElementById('journal-path').value = '';
+  updateMetaStatus();
+  log('API keys cleared from browser');
+}
+
+function saveSettings() {
+  var token = document.getElementById('meta-token').value.trim();
+  var account = document.getElementById('meta-account').value.trim();
+  var jPath = document.getElementById('journal-path').value.trim();
+
+  if (!token || !account) {
+    alert('Please enter both MetaApi Token and Account ID');
+    return;
+  }
+
+  var cfg = { token: token, account: account, journalPath: jPath };
+  localStorage.setItem('metaapi_config', JSON.stringify(cfg));
+  metaToken = token;
+  metaAccount = account;
+  journalPath = jPath;
+
+  log('Connecting to MetaApi with account: ' + account);
+  closeModal();
+  initConnection();
+}
+
+// ===== JOURNAL =====
+function openJournalEntry() {
+  document.getElementById('journal-modal').classList.add('open');
+}
+
+function closeJournalModal() {
+  document.getElementById('journal-modal').classList.remove('open');
+}
+
+function submitJournalEntry() {
+  var entry = {
+    symbol: document.getElementById('j-symbol').value,
+    type: document.getElementById('j-type').value,
+    volume: parseFloat(document.getElementById('j-volume').value) || 0,
+    pnl: parseFloat(document.getElementById('j-pnl').value) || 0,
+    setup: document.getElementById('j-setup').value,
+    tags: document.getElementById('j-tags').value.split(',').map(function(t){ return t.trim(); }).filter(function(t){ return t; }),
+    date: new Date().toISOString(),
+    notes: ''
+  };
+
+  fetch(BASE + '/api/journal', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(entry)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    log('Journal entry saved: ' + entry.symbol + ' ' + entry.type + ' $' + entry.pnl);
+    closeJournalModal();
+    fetchJournal();
+    // Clear form
+    document.getElementById('j-symbol').value = '';
+    document.getElementById('j-pnl').value = '';
+    document.getElementById('j-setup').value = '';
+    document.getElementById('j-tags').value = '';
+  }).catch(function(e){ log('Journal save error: ' + e.message); });
+}
+
+function fetchJournal() {
+  fetch(BASE + '/api/journal').then(function(r){ return r.json(); }).then(function(d){
+    if (!d || !d.length) return;
+    var stats = '';
+    var wins = d.filter(function(e){ return e.pnl > 0; }).length;
+    var total = d.length;
+    var totalPnl = d.reduce(function(s,e){ return s + (e.pnl||0); }, 0);
+    stats += '<span style="background:#0f172a;padding:4px 10px;border-radius:6px;font-size:12px">Trades: <b style="color:#e2e8f0">'+total+'</b></span>';
+    stats += '<span style="background:#0f172a;padding:4px 10px;border-radius:6px;font-size:12px">Win: <b style="color:#4ade80">'+wins+'</b></span>';
+    stats += '<span style="background:#0f172a;padding:4px 10px;border-radius:6px;font-size:12px">P&L: <b style="color:'+(totalPnl>=0?'#4ade80':'#f87171')+'">$'+(totalPnl>=0?'+':'')+totalPnl.toFixed(2)+'</b></span>';
+    document.getElementById('journal-stats').innerHTML = stats;
+
+    var el = document.getElementById('journal-list');
+    el.innerHTML = d.slice(-10).reverse().map(function(e){
+      var c = e.pnl >= 0 ? 'profit' : 'loss';
+      return '<div style="background:#0f172a;padding:8px;border-radius:6px;margin:6px 0;font-size:12px">' +
+        '<div style="display:flex;justify-content:space-between"><b>'+e.symbol+'</b> <span>'+e.type.toUpperCase()+'</span> <span class="'+c+'">$'+(e.pnl||0).toFixed(2)+'</span></div>' +
+        '<div style="color:#64748b;margin-top:2px">'+(e.setup||'') + (e.tags&&e.tags.length?' #'+e.tags.join(' #'):'')+'</div></div>';
+    }).join('');
+  }).catch(function(e){});
+}
+
+// ===== CONNECTION =====
+function initConnection() {
+  if (!metaToken || !metaAccount) {
+    var saved = localStorage.getItem('metaapi_config');
+    if (saved) {
+      var cfg = JSON.parse(saved);
+      metaToken = cfg.token;
+      metaAccount = cfg.account;
+      journalPath = cfg.journalPath || '';
+    }
+  }
+  if (!metaToken || !metaAccount) {
+    log('No API keys — open Settings to configure');
+    document.getElementById('conn-status').className = 'status disconnected';
+    document.getElementById('conn-status').textContent = 'Not Connected';
+    return;
+  }
+  log('Initializing MetaApi connection...');
+  fetch(BASE + '/api/init', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ token: metaToken, accountId: metaAccount, journalPath: journalPath })
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (d.error) {
+      log('Connection failed: ' + d.error);
+      document.getElementById('conn-status').className = 'status disconnected';
+      document.getElementById('conn-status').textContent = 'Connection Failed';
+    } else {
+      log('Connected to MetaApi! Server: ' + d.server);
+      document.getElementById('conn-status').className = 'status connected';
+      document.getElementById('conn-status').textContent = 'Connected';
+      connected = true;
+      refreshAll();
+    }
+  }).catch(function(e){
+    log('Connection error: ' + e.message);
+  });
+}
+
+// ===== LOGGING =====
 function log(msg) {
   var el = document.getElementById('log');
-  el.innerHTML = new Date().toLocaleTimeString() + ' - ' + msg + '<br>' + el.innerHTML;
+  var time = new Date().toLocaleTimeString();
+  el.innerHTML = '<div><span style="color:#475569">['+time+']</span> ' + msg + '</div>' + el.innerHTML;
+  if (el.innerHTML.length > 5000) el.innerHTML = el.innerHTML.substring(0, 5000);
 }
 function clearLog() { document.getElementById('log').innerHTML = ''; }
 
+// ===== DATA FETCHING =====
 function refreshAll() {
   log('Refreshing all data...');
-  fetchAccount(); fetchPositions(); fetchOrders(); fetchHistory();
+  fetchAccount(); fetchPositions(); fetchOrders(); fetchHistory(); fetchJournal();
 }
 
 function getPrice() {
@@ -140,7 +441,7 @@ function getPrice() {
       '<div><span class="price-bid">Bid: ' + (d.bid || 'N/A') + '</span></div>' +
       '<div><span class="price-ask">Ask: ' + (d.ask || 'N/A') + '</span></div>' +
       '<div class="price-spread">Spread: ' + spread + ' pts | ' + sym + '</div>';
-    log(sym + ' Bid:' + d.bid + ' Ask:' + d.ask);
+    log(sym + ' Bid:' + (d.bid||'').toFixed(5) + ' Ask:' + (d.ask||'').toFixed(5));
   }).catch(function(e){ log('Price error: ' + e.message); });
 }
 
@@ -159,17 +460,17 @@ function fetchAccount() {
       '<div class="stat"><span class="stat-label">Leverage</span><span class="stat-value">1:' + d.leverage + '</span></div>' +
       '<div class="stat"><span class="stat-label">Server</span><span class="stat-value">' + (d.server || '') + '</span></div>';
     log('Account loaded - Balance: $' + (d.balance || 0).toFixed(2));
-  }).catch(function(e){ log('Fetch error: ' + e.message); });
+  }).catch(function(e){ log('Fetch account error: ' + e.message); });
 }
 
 function fetchPositions() {
   fetch(BASE + '/api/positions').then(function(r){return r.json()}).then(function(d){
-    if (d.error) return;
+    if (d.error) { log('Positions error: ' + d.error); return; }
     var el = document.getElementById('positions-list');
-    if (!d.length) { el.innerHTML = '<p style="color:#64748b">No open positions</p>'; return; }
+    if (!d || !d.length) { el.innerHTML = '<p style="color:#64748b">No open positions</p>'; return; }
     el.innerHTML = d.map(function(p){
       var pClass = (p.profit >= 0) ? 'profit' : 'loss';
-      return '<div class="pos-item"><div><strong>' + p.symbol + '</strong> ' + p.type + ' ' + p.volume + ' lots<br><span class="' + pClass + '">$' + (p.profit || 0).toFixed(2) + '</span></div><button class="btn btn-danger btn-sm" onclick="closePos(\'' + p.id + '\')" >Close</button></div>';
+      return '<div class="pos-item"><div><strong>' + p.symbol + '</strong> ' + p.type + ' ' + p.volume + ' lots<br><span class="' + pClass + '">$' + (p.profit || 0).toFixed(2) + '</span></div><button class="btn btn-danger btn-sm" onclick="closePos(\'' + p.id + '\')">Close</button></div>';
     }).join('');
     log('Positions loaded: ' + d.length + ' open');
   }).catch(function(e){});
@@ -179,8 +480,8 @@ function fetchOrders() {
   fetch(BASE + '/api/orders').then(function(r){return r.json()}).then(function(d){
     if (d.error) return;
     var el = document.getElementById('orders-list');
-    if (!d.length) { el.innerHTML = '<p style="color:#64748b">No pending orders</p>'; return; }
-    el.innerHTML = d.map(function(o){ return '<div class="pos-item"><div><strong>' + o.symbol + '</strong> ' + o.type + ' ' + o.volume + ' lots @ ' + o.openPrice + '</div></div>'; }).join('');
+    if (!d || !d.length) { el.innerHTML = '<p style="color:#64748b">No pending orders</p>'; return; }
+    el.innerHTML = d.map(function(o){ return '<div class="pos-item"><div><strong>' + o.symbol + '</strong> ' + o.type + ' ' + o.volume + ' lots @ ' + (o.price||o.openPrice||'N/A') + '</div></div>'; }).join('');
   }).catch(function(e){});
 }
 
@@ -188,11 +489,13 @@ function fetchHistory() {
   fetch(BASE + '/api/history').then(function(r){return r.json()}).then(function(d){
     if (d.error) return;
     var el = document.getElementById('history-list');
-    if (!d.length) { el.innerHTML = '<p style="color:#64748b">No recent deals</p>'; return; }
+    if (!d || !d.length) { el.innerHTML = '<p style="color:#64748b">No recent deals</p>'; return; }
     el.innerHTML = d.slice(0,20).map(function(h){ return '<div class="pos-item"><div><strong>' + (h.symbol||'') + '</strong> ' + (h.type||'') + '<br><span class="' + ((h.profit >= 0) ? 'profit' : 'loss') + '">$' + (h.profit || 0).toFixed(2) + '</span></div></div>'; }).join('');
+    log('History loaded: ' + d.length + ' deals');
   }).catch(function(e){});
 }
 
+// ===== TRADING =====
 function placeTrade(type, vol) {
   var symbol = document.getElementById('symbol').value;
   var volume = vol || parseFloat(document.getElementById('volume').value);
@@ -206,7 +509,7 @@ function placeTrade(type, vol) {
     if (d.error) { log('Trade error: ' + d.error); document.getElementById('trade-result').innerHTML = '<span class="loss">' + d.error + '</span>'; return; }
     log('Trade executed: ' + type.toUpperCase() + ' ' + volume + ' ' + symbol);
     document.getElementById('trade-result').innerHTML = '<span class="profit">Order placed!</span>';
-    setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
+    setTimeout(function(){ fetchPositions(); fetchAccount(); fetchJournal(); }, 2000);
   }).catch(function(e){ log('Trade error: ' + e.message); });
 }
 
@@ -225,7 +528,8 @@ function quickTrade(type, vol) {
 
 function closePos(id) {
   log('Closing position ' + id + '...');
-  fetch(BASE + '/api/close/' + id, { method: 'POST' }).then(function(){
+  fetch(BASE + '/api/close/' + id, { method: 'POST' }).then(function(r){return r.json()}).then(function(d){
+    if (d.error) { log('Close error: ' + d.error); return; }
     log('Position closed');
     setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
   }).catch(function(e){ log('Close error: ' + e.message); });
@@ -235,12 +539,32 @@ function closeAllPositions() {
   if (!confirm('Close ALL positions?')) return;
   log('Closing all positions...');
   fetch(BASE + '/api/close-all', { method: 'POST' }).then(function(r){return r.json()}).then(function(d){
-    log('Closed ' + d.closed + ' positions');
+    if (d.error) { log('Close all error: ' + d.error); return; }
+    log('Closed ' + (d.closed||d.results?.length||'?') + ' positions');
     setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
   }).catch(function(e){ log('Error: ' + e.message); });
 }
 
-fetchAccount(); fetchPositions(); fetchOrders(); fetchHistory();
-setInterval(function(){ fetchAccount(); fetchPositions(); fetchOrders(); }, 10000);
+// ===== INIT =====
+window.addEventListener('load', function(){
+  var saved = localStorage.getItem('metaapi_config');
+  if (saved) {
+    var cfg = JSON.parse(saved);
+    metaToken = cfg.token || '';
+    metaAccount = cfg.account || '';
+    journalPath = cfg.journalPath || '';
+    if (metaToken && metaAccount) {
+      log('Auto-connecting with saved keys...');
+      initConnection();
+    } else {
+      log('Configure API keys in Settings');
+    }
+  } else {
+    log('Open Settings ⚙️ to enter your MetaApi keys');
+  }
+});
+
+// Auto-refresh every 30s
+setInterval(function(){ if (connected) { fetchAccount(); fetchPositions(); fetchOrders(); } }, 30000);
 </script>
 </body></html>

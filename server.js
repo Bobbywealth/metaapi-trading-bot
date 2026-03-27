@@ -9,18 +9,66 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const META_API_TOKEN = process.env.META_API_TOKEN;
-const ACCOUNT_ID = process.env.META_API_ACCOUNT_ID;
 
-let metaApi, account, connection;
+// MetaApi state — initialized from environment or runtime via /api/init
+let metaApi = null;
+let account = null;
+let connection = null;
+let runtimeToken = null;
+let runtimeAccountId = null;
+let runtimeJournalPath = null;
+let connected = false;
 
-// In-memory journal storage (resets on redeploy)
+// In-memory journal (optionally backed by file)
 let journalEntries = [];
+const JOURNAL_FILE = process.env.JOURNAL_FILE || '/tmp/trades-journal.json';
 
-async function initMetaApi() {
+// ===== JOURNAL PERSISTENCE =====
+function loadJournal() {
+  if (fs.existsSync(JOURNAL_FILE)) {
+    try {
+      const data = fs.readFileSync(JOURNAL_FILE, 'utf8');
+      journalEntries = JSON.parse(data);
+      console.log('Journal loaded from', JOURNAL_FILE, ':', journalEntries.length, 'entries');
+    } catch (e) {
+      console.log('Could not load journal file:', e.message);
+    }
+  }
+}
+
+function saveJournal() {
+  if (!runtimeJournalPath) return; // Only save if file path configured
   try {
-    metaApi = new MetaApi(META_API_TOKEN);
-    account = await metaApi.metatraderAccountApi.getAccount(ACCOUNT_ID);
+    fs.writeFileSync(JOURNAL_FILE, JSON.stringify(journalEntries, null, 2));
+  } catch (e) {
+    console.log('Journal save error:', e.message);
+  }
+}
+
+function initJournalPath(journalPath) {
+  if (journalPath) {
+    runtimeJournalPath = journalPath;
+    loadJournal();
+  }
+}
+
+// ===== INIT METAAPI =====
+async function initMetaApi(token, accountId) {
+  // Close existing connection if re-connecting
+  if (connection) {
+    try { await connection.close(); } catch(e) {}
+    connection = null;
+    account = null;
+    metaApi = null;
+    connected = false;
+  }
+
+  try {
+    console.log('Initializing MetaApi...');
+    metaApi = new MetaApi(token);
+    account = await metaApi.metatraderAccountApi.getAccount(accountId);
+    console.log('Account state:', account.state);
+
     if (account.state !== 'DEPLOYED') {
       console.log('Deploying account...');
       await account.deploy();
@@ -29,14 +77,44 @@ async function initMetaApi() {
     connection = account.getRPCConnection();
     await connection.connect();
     await connection.waitSynchronized();
+
+    runtimeToken = token;
+    runtimeAccountId = accountId;
+    connected = true;
     console.log('MetaApi connected and synchronized!');
+    return { success: true, server: account.server || 'connected' };
   } catch (err) {
+    connected = false;
     console.error('MetaApi init error:', err.message);
+    return { error: err.message };
   }
 }
 
+// ===== INIT ENDPOINT (called by frontend) =====
+app.post('/api/init', async (req, res) => {
+  const { token, accountId, journalPath } = req.body;
+  if (!token || !accountId) {
+    return res.status(400).json({ error: 'token and accountId required' });
+  }
+  initJournalPath(journalPath);
+  const result = await initMetaApi(token, accountId);
+  res.json(result);
+});
+
+// ===== CONFIG STATUS =====
+app.get('/api/config-status', (req, res) => {
+  res.json({
+    configured: !!(runtimeToken && runtimeAccountId),
+    connected,
+    accountId: runtimeAccountId ? (runtimeAccountId.substring(0, 8) + '...') : null,
+    journalPath: runtimeJournalPath || null,
+    journalEntries: journalEntries.length
+  });
+});
+
 // ===== TRADING API ROUTES =====
 app.get('/api/account', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected to MetaApi. Open Settings and enter your API keys.' });
   try {
     const info = await connection.getAccountInformation();
     res.json(info);
@@ -46,6 +124,7 @@ app.get('/api/account', async (req, res) => {
 });
 
 app.get('/api/positions', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const positions = await connection.getPositions();
     res.json(positions);
@@ -55,6 +134,7 @@ app.get('/api/positions', async (req, res) => {
 });
 
 app.get('/api/orders', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const orders = await connection.getOrders();
     res.json(orders);
@@ -64,6 +144,7 @@ app.get('/api/orders', async (req, res) => {
 });
 
 app.get('/api/history', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const end = new Date();
@@ -75,6 +156,7 @@ app.get('/api/history', async (req, res) => {
 });
 
 app.get('/api/price/:symbol', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const tick = await connection.getSymbolPrice(req.params.symbol);
     res.json(tick);
@@ -84,6 +166,7 @@ app.get('/api/price/:symbol', async (req, res) => {
 });
 
 app.post('/api/trade', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const { symbol, type, volume, stopLoss, takeProfit } = req.body;
     const vol = parseFloat(volume);
@@ -94,6 +177,7 @@ app.post('/api/trade', async (req, res) => {
     const tp = takeProfit ? parseFloat(takeProfit) : undefined;
     let result;
     console.log('Placing trade:', type, symbol, vol, 'SL:', sl, 'TP:', tp);
+
     if (type === 'buy') {
       result = await connection.createMarketBuyOrder(symbol, vol, sl, tp);
     } else if (type === 'sell') {
@@ -101,8 +185,9 @@ app.post('/api/trade', async (req, res) => {
     } else {
       return res.status(400).json({ error: 'Type must be buy or sell' });
     }
+
     // Auto-add to journal
-    journalEntries.push({
+    const entry = {
       id: Date.now(),
       date: new Date().toISOString(),
       symbol: symbol,
@@ -111,8 +196,13 @@ app.post('/api/trade', async (req, res) => {
       result: result.stringCode || 'executed',
       pnl: 0,
       notes: 'Auto-logged trade',
-      tags: ['auto']
-    });
+      tags: ['auto'],
+      orderId: result.orderId || null,
+      positionId: result.positionId || null
+    };
+    journalEntries.push(entry);
+    saveJournal();
+
     console.log('Trade result:', JSON.stringify(result));
     res.json(result);
   } catch (err) {
@@ -122,6 +212,7 @@ app.post('/api/trade', async (req, res) => {
 });
 
 app.post('/api/close/:positionId', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const result = await connection.closePosition(req.params.positionId);
     res.json(result);
@@ -131,14 +222,19 @@ app.post('/api/close/:positionId', async (req, res) => {
 });
 
 app.post('/api/close-all', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
     const positions = await connection.getPositions();
     const results = [];
     for (const pos of positions) {
-      const r = await connection.closePosition(pos.id);
-      results.push(r);
+      try {
+        const r = await connection.closePosition(pos.id);
+        results.push({ id: pos.id, success: true, result: r });
+      } catch(e) {
+        results.push({ id: pos.id, success: false, error: e.message });
+      }
     }
-    res.json({ closed: results.length, results });
+    res.json({ closed: results.filter(r => r.success).length, results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -165,6 +261,7 @@ app.post('/api/journal', (req, res) => {
     screenshot: screenshot || ''
   };
   journalEntries.push(entry);
+  saveJournal();
   res.json(entry);
 });
 
@@ -173,12 +270,14 @@ app.put('/api/journal/:id', (req, res) => {
   const idx = journalEntries.findIndex(e => e.id === id);
   if (idx === -1) return res.status(404).json({ error: 'Entry not found' });
   journalEntries[idx] = { ...journalEntries[idx], ...req.body, id: id };
+  saveJournal();
   res.json(journalEntries[idx]);
 });
 
 app.delete('/api/journal/:id', (req, res) => {
   const id = parseInt(req.params.id);
   journalEntries = journalEntries.filter(e => e.id !== id);
+  saveJournal();
   res.json({ deleted: true });
 });
 
@@ -198,8 +297,20 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ===== START SERVER =====
+// ===== AUTO-INIT FROM ENV (optional fallback) =====
 app.listen(PORT, async () => {
   console.log('Trading bot running on port ' + PORT);
-  await initMetaApi();
+
+  // Try env vars first, otherwise let user configure via UI
+  const envToken = process.env.META_API_TOKEN;
+  const envAccountId = process.env.META_API_ACCOUNT_ID;
+  const envJournalPath = process.env.JOURNAL_FILE;
+
+  if (envToken && envAccountId) {
+    console.log('MetaApi env vars detected — connecting...');
+    initJournalPath(envJournalPath);
+    await initMetaApi(envToken, envAccountId);
+  } else {
+    console.log('No env vars set — open the UI and use Settings to configure your API keys.');
+  }
 });
