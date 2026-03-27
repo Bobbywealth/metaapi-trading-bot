@@ -198,10 +198,60 @@ input:focus { outline:none; border-color:#38bdf8; }
     <div id="journal-list" style="max-height:200px;overflow-y:auto"><p style="color:#64748b">No journal entries</p></div>
   </div>
   <div class="card">
+    <h2>🔑 API Keys
+      <button class="btn btn-secondary btn-sm" onclick="openApiKeysModal()">Manage Keys</button>
+    </h2>
+    <p style="color:#64748b;font-size:13px;margin-bottom:10px">Create keys to connect this bot with Zapier, n8n, Python scripts, and other apps.</p>
+    <button class="btn btn-sm" onclick="openApiKeysModal()">View & Create API Keys</button>
+    <div id="api-keys-hint" style="margin-top:10px;font-size:12px;color:#475569">No keys created yet</div>
+  </div>
+  <div class="card">
+    <h2>📖 API Docs
+      <a href="/api/docs" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none">Open Docs</a>
+    </h2>
+    <p style="color:#64748b;font-size:13px">Full REST API documentation with examples for every endpoint.</p>
+    <div style="margin-top:10px;font-size:12px;color:#475569">Base URL: <code style="background:#0f172a;padding:2px 6px;border-radius:4px;color:#7dd3fc">/api</code></div>
+    <div style="margin-top:6px;font-size:12px;color:#475569">Auth: <code style="background:#0f172a;padding:2px 6px;border-radius:4px;color:#7dd3fc">X-API-KEY: mtrd_...</code></div>
+  </div>
+  <div class="card">
     <h2>Activity Log
       <button class="btn btn-secondary btn-sm" onclick="clearLog()">Clear</button>
     </h2>
     <div id="log"></div>
+  </div>
+</div>
+
+<!-- API Keys Modal -->
+<div class="modal-overlay" id="apikeys-modal">
+  <div class="modal" style="max-width:650px">
+    <h2>🔑 API Keys</h2>
+    <p style="color:#64748b;font-size:13px;margin-bottom:16px">Create API keys to connect this bot with external apps. The full key is only shown once — copy it immediately.</p>
+
+    <div style="margin-bottom:20px">
+      <div class="form-group">
+        <label>New Key Label (e.g. "Zapier", "n8n", "Home script")</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="new-key-label" placeholder="e.g. Zapier Integration" style="flex:1">
+          <button class="btn btn-success" onclick="createApiKey()">Generate Key</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="new-key-result" style="display:none;background:#0f172a;border-radius:8px;padding:14px;margin-bottom:16px;border:1px solid #38bdf8">
+      <div style="color:#fbbf24;font-size:12px;margin-bottom:8px">⚠️ Copy this key now — it will never be shown again!</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code id="new-key-value" style="background:#1e293b;padding:8px 12px;border-radius:6px;font-size:13px;color:#7dd3fc;flex:1;word-break:break-all"></code>
+        <button class="btn btn-sm" onclick="copyNewKey()">Copy</button>
+      </div>
+    </div>
+
+    <h3 style="color:#94a3b8;font-size:12px;margin-bottom:10px;text-transform:uppercase;letter-spacing:1px">Active Keys</h3>
+    <div id="api-keys-list" style="max-height:300px;overflow-y:auto"><p style="color:#64748b;font-size:13px">Loading...</p></div>
+
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeApiKeysModal()">Done</button>
+      <button class="btn btn-danger btn-sm" onclick="revokeAllKeys()" style="margin-left:auto;color:#f87171">Revoke All Keys</button>
+    </div>
   </div>
 </div>
 
@@ -248,6 +298,103 @@ var metaToken = '';
 var metaAccount = '';
 var journalPath = '';
 var connected = false;
+var newKeyJustCreated = null; // holds the full key temporarily
+
+// ===== API KEYS =====
+function openApiKeysModal() {
+  document.getElementById('apikeys-modal').classList.add('open');
+  document.getElementById('new-key-result').style.display = 'none';
+  document.getElementById('new-key-label').value = '';
+  loadApiKeys();
+}
+
+function closeApiKeysModal() {
+  document.getElementById('apikeys-modal').classList.remove('open');
+  newKeyJustCreated = null;
+  document.getElementById('new-key-result').style.display = 'none';
+}
+
+function loadApiKeys() {
+  fetch(BASE + '/api/keys').then(function(r){ return r.json(); }).then(function(keys){
+    var el = document.getElementById('api-keys-list');
+    if (!keys || keys.length === 0) {
+      el.innerHTML = '<p style="color:#64748b;font-size:13px">No API keys yet. Create one above.</p>';
+      return;
+    }
+    el.innerHTML = keys.map(function(k){
+      var status = k.active
+        ? '<span style="background:#065f46;color:#6ee7b7;padding:2px 8px;border-radius:4px;font-size:11px">Active</span>'
+        : '<span style="background:#7f1d1d;color:#fca5a5;padding:2px 8px;border-radius:4px;font-size:11px">Revoked</span>';
+      var lastUsed = k.lastUsed ? new Date(k.lastUsed).toLocaleString() : 'Never';
+      return '<div style="background:#0f172a;border-radius:8px;padding:12px;margin:8px 0;border:1px solid #334155">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+          '<div><b style="color:#e2e8f0">'+k.label+'</b> '+status+'</div>' +
+          '<div style="display:flex;gap:6px">' +
+            '<button class="btn btn-sm" onclick="toggleKey(\''+k.id+'\','+!k.active+')">'+(k.active?'Revoke':'Activate')+'</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteKey(\''+k.id+'\')">Delete</button>' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-family:monospace;font-size:12px;color:#38bdf8;background:#1e293b;padding:4px 8px;border-radius:4px;display:inline-block;margin-bottom:4px">'+k.prefix+'</div>' +
+        '<div style="font-size:11px;color:#475569;margin-top:4px">Created: '+new Date(k.createdAt).toLocaleString()+' · Last used: '+lastUsed+'</div>' +
+      '</div>';
+    }).join('');
+  }).catch(function(e){
+    document.getElementById('api-keys-list').innerHTML = '<p style="color:#f87171;font-size:13px">Error loading keys: '+e.message+'</p>';
+  });
+}
+
+function createApiKey() {
+  var label = document.getElementById('new-key-label').value.trim();
+  if (!label) { alert('Enter a label for this key'); return; }
+  fetch(BASE + '/api/keys', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ label: label, permissions: ['read','trade','journal'] })
+  }).then(function(r){ return r.json(); }).then(function(data){
+    if (data.error) { alert('Error: ' + data.error); return; }
+    newKeyJustCreated = data.key;
+    document.getElementById('new-key-value').textContent = data.key;
+    document.getElementById('new-key-result').style.display = 'block';
+    log('API key created: ' + data.label + ' → ' + data.prefix);
+    loadApiKeys();
+  }).catch(function(e){ alert('Error: ' + e.message); });
+}
+
+function copyNewKey() {
+  if (!newKeyJustCreated) return;
+  navigator.clipboard.writeText(newKeyJustCreated).then(function(){
+    log('API key copied to clipboard');
+  }).catch(function(){
+    prompt('Copy this key:', newKeyJustCreated);
+  });
+}
+
+function toggleKey(id, activate) {
+  fetch(BASE + '/api/keys/' + id, {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ active: activate })
+  }).then(function(r){ return r.json(); }).then(function(){
+    log('API key ' + (activate ? 'activated' : 'revoked'));
+    loadApiKeys();
+  }).catch(function(e){ alert('Error: ' + e.message); });
+}
+
+function deleteKey(id) {
+  if (!confirm('Delete this API key permanently?')) return;
+  fetch(BASE + '/api/keys/' + id, { method: 'DELETE' }).then(function(r){ return r.json(); }).then(function(){
+    log('API key deleted');
+    loadApiKeys();
+  }).catch(function(e){ alert('Error: ' + e.message); });
+}
+
+function revokeAllKeys() {
+  if (!confirm('Revoke ALL API keys? External apps will lose access immediately.')) return;
+  fetch(BASE + '/api/keys', { method: 'DELETE' }).then(function(r){ return r.json(); }).then(function(data){
+    log('All ' + (data.revoked||0) + ' API keys revoked');
+    loadApiKeys();
+  }).catch(function(e){ alert('Error: ' + e.message); });
+}
 
 // ===== SETTINGS =====
 function openModal() {
@@ -261,6 +408,19 @@ function openModal() {
     document.getElementById('journal-path').value = cfg.journalPath || '';
   }
   updateMetaStatus();
+  loadApiKeysSummary();
+}
+
+function loadApiKeysSummary() {
+  fetch(BASE + '/api/keys').then(function(r){ return r.json(); }).then(function(keys){
+    var count = keys ? keys.length : 0;
+    document.getElementById('api-keys-hint').innerHTML =
+      count === 0
+        ? '<span style="color:#475569">No keys created yet</span>'
+        : '<span style="color:#4ade80">'+count+' key'+(count!==1?'s':'')+' active</span> · <span style="color:#94a3b8">Manage in API Keys panel</span>';
+  }).catch(function(){
+    document.getElementById('api-keys-hint').innerHTML = '<span style="color:#475569">Connect MetaApi to manage keys</span>';
+  });
 }
 
 function closeModal() {
