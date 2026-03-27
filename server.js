@@ -2,7 +2,6 @@ const express = require('express');
 const MetaApi = require('metaapi.cloud-sdk').default;
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -33,7 +32,6 @@ async function initMetaApi() {
 }
 
 // ===== API ROUTES =====
-
 app.get('/api/account', async (req, res) => {
   try {
     const info = await connection.getAccountInformation();
@@ -84,14 +82,25 @@ app.get('/api/price/:symbol', async (req, res) => {
 app.post('/api/trade', async (req, res) => {
   try {
     const { symbol, type, volume, stopLoss, takeProfit } = req.body;
-    let result;
-    if (type === 'buy') {
-      result = await connection.createMarketBuyOrder(symbol, volume, stopLoss, takeProfit);
-    } else {
-      result = await connection.createMarketSellOrder(symbol, volume, stopLoss, takeProfit);
+    const vol = parseFloat(volume);
+    if (!symbol || !type || isNaN(vol) || vol <= 0) {
+      return res.status(400).json({ error: 'Invalid trade parameters. Need symbol, type, and valid volume.' });
     }
+    const sl = stopLoss ? parseFloat(stopLoss) : undefined;
+    const tp = takeProfit ? parseFloat(takeProfit) : undefined;
+    let result;
+    console.log('Placing trade:', type, symbol, vol, 'SL:', sl, 'TP:', tp);
+    if (type === 'buy') {
+      result = await connection.createMarketBuyOrder(symbol, vol, sl, tp);
+    } else if (type === 'sell') {
+      result = await connection.createMarketSellOrder(symbol, vol, sl, tp);
+    } else {
+      return res.status(400).json({ error: 'Type must be buy or sell' });
+    }
+    console.log('Trade result:', JSON.stringify(result));
     res.json(result);
   } catch (err) {
+    console.error('Trade error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
