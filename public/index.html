@@ -294,6 +294,7 @@ input:focus { outline:none; border-color:#38bdf8; }
 
 <script>
 var BASE = '';
+  var _origFetch = window.fetch; window.fetch = function(url, opts) { opts = opts || {}; opts.headers = opts.headers || {}; var k = localStorage.getItem('dashboard_api_key'); if (k && typeof url === 'string' && url.indexOf('/api/') !== -1) { if (opts.headers instanceof Headers) { if (!opts.headers.has('X-API-KEY')) opts.headers.set('X-API-KEY', k); } else { if (!opts.headers['X-API-KEY']) opts.headers['X-API-KEY'] = k; } } return _origFetch.call(window, url, opts); };
 var metaToken = '';
 var metaAccount = '';
 var journalPath = '';
@@ -384,7 +385,7 @@ function createApiKey() {
     return r.json();
   }).then(function(data){
     if (data.error) { alert('Error: ' + data.error); return; }
-    newKeyJustCreated = data.key;
+    newKeyJustCreated = data.key; localStorage.setItem('dashboard_api_key', data.key); API_KEY = data.key;
     document.getElementById('new-key-value').textContent = data.key;
     document.getElementById('new-key-result').style.display = 'block';
     log('API key created: ' + data.label + ' → ' + data.prefix);
