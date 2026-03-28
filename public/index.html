@@ -753,6 +753,7 @@ window.addEventListener('load', function(){
   if (saved) {
     var cfg = JSON.parse(saved);
     metaToken = cfg.token || '';
+        if (!localStorage.getItem('dashboard_api_key')) { localStorage.setItem('dashboard_api_key', 'mtrd_693617a98c5a002d465f35df734e29bdf636eb5bff3fad1f'); }
     metaAccount = cfg.account || '';
     journalPath = cfg.journalPath || '';
     if (metaToken && metaAccount) {
