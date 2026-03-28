@@ -919,6 +919,17 @@ app.get('/', (req, res) => {
 // ===== AUTO-INIT FROM ENV =====
 app.listen(PORT, async () => {
   console.log('Trading bot running on port ' + PORT);
+    // Seed default dashboard API key from env var
+  const defaultKey = process.env.DEFAULT_API_KEY;
+  if (defaultKey) {
+    const keys = loadApiKeys();
+    const hashed = hashKey(defaultKey);
+    if (!keys.find(k => k.hash === hashed)) {
+      keys.push({ id: 'default', label: 'Dashboard (auto)', key: defaultKey, hash: hashed, permissions: ['read','trade','journal'], active: true, createdAt: new Date().toISOString(), lastUsed: null });
+      saveApiKeys(keys);
+      console.log('Default API key seeded from env.');
+    }
+  }
   const envToken = process.env.META_API_TOKEN;
   const envAccountId = process.env.META_API_ACCOUNT_ID;
   const envJournalPath = process.env.JOURNAL_FILE;
