@@ -753,7 +753,7 @@ window.addEventListener('load', function(){
   if (saved) {
     var cfg = JSON.parse(saved);
     metaToken = cfg.token || '';
-        if (!localStorage.getItem('dashboard_api_key')) { localStorage.setItem('dashboard_api_key', 'mtrd_96e2012a9cd2ecfe0505e00a81f62e9dd60b42d69272a711'); }
+    localStorage.setItem('dashboard_api_key', 'mtrd_96e2012a9cd2ecfe0505e00a81f62e9dd60b42d69272a711');
     metaAccount = cfg.account || '';
     journalPath = cfg.journalPath || '';
     if (metaToken && metaAccount) {
