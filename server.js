@@ -90,6 +90,37 @@ let runtimeAccountId = null;
 let runtimeJournalPath = null;
 let connected = false;
 
+let brokerSymbols = [];
+let symbolMap = {};
+
+// ===== SYMBOL RESOLUTION =====
+async function fetchBrokerSymbols() {
+  if (!connection) return [];
+  try {
+    const symbols = await connection.getSymbols();
+    brokerSymbols = symbols.map(s => s.symbol || s);
+    const generics = ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','XAUUSD','BTCUSD','US30','NAS100','SPX500'];
+    symbolMap = {};
+    for (const g of generics) {
+      const exact = brokerSymbols.find(s => s === g);
+      if (exact) { symbolMap[g] = exact; continue; }
+      const match = brokerSymbols.find(s => s.toUpperCase().startsWith(g.toUpperCase()) || s.toUpperCase().includes(g.toUpperCase()));
+      if (match) symbolMap[g] = match;
+    }
+    console.log('Symbol map built:', symbolMap);
+    return brokerSymbols;
+  } catch(e) { console.log('fetchBrokerSymbols error:', e.message); return []; }
+}
+
+function resolveSymbol(sym) {
+  if (!sym) return sym;
+  if (brokerSymbols.includes(sym)) return sym;
+  if (symbolMap[sym.toUpperCase()]) return symbolMap[sym.toUpperCase()];
+  const upper = sym.toUpperCase();
+  const match = brokerSymbols.find(s => s.toUpperCase().startsWith(upper) || s.toUpperCase().includes(upper));
+  return match || sym;
+}
+
 // In-memory journal
 let journalEntries = [];
 const JOURNAL_FILE = process.env.JOURNAL_FILE || path.join(PERSIST_DIR, 'trades-journal.json');
@@ -142,6 +173,7 @@ async function initMetaApi(token, accountId) {
     runtimeToken = token;
     runtimeAccountId = accountId;
     connected = true;
+        await fetchBrokerSymbols();
     console.log('MetaApi connected!');
     return { success: true, server: account.server || 'connected' };
   } catch(err) {
@@ -766,10 +798,20 @@ app.get('/api/history', requireApiKey, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+app.get('/api/symbols', async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
+  try {
+    if (brokerSymbols.length === 0) await fetchBrokerSymbols();
+    res.json({ symbols: brokerSymbols, map: symbolMap });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/price/:symbol', requireApiKey, async (req, res) => {
   if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
-    const tick = await connection.getSymbolPrice(req.params.symbol);
+    const resolved = resolveSymbol(req.params.symbol);
+    const tick = await connection.getSymbolPrice(resolved);
     res.json({
       symbol: req.params.symbol,
       bid: tick.bid,
@@ -791,8 +833,8 @@ app.post('/api/trade', requireApiKey, async (req, res) => {
     const sl = stopLoss ? parseFloat(stopLoss) : undefined;
     const tp = takeProfit ? parseFloat(takeProfit) : undefined;
     let result;
-    if (type === 'buy') result = await connection.createMarketBuyOrder(symbol, vol, sl, tp);
-    else if (type === 'sell') result = await connection.createMarketSellOrder(symbol, vol, sl, tp);
+    if (type === 'buy') result = await connection.createMarketBuyOrder(resolveSymbol(symbol), vol, sl, tp);
+    else if (type === 'sell') result = await connection.createMarketSellOrder(resolveSymbol(symbol), vol, sl, tp);
     else return res.status(400).json({ error: 'Type must be buy or sell' });
 
     // Auto-journal
