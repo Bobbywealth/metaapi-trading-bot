@@ -101,7 +101,10 @@ async function fetchBrokerSymbols() {
     brokerSymbols = symbols.map(s => s.symbol || s);
     const generics = ['EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','XAUUSD','BTCUSD','US30','NAS100','SPX500'];
     symbolMap = {};
-    for (const g of generics) {
+        for (const g of generics) {
+      // Prefer suffixed version (e.g. EURUSD. over EURUSD) as brokers often disable the plain one
+      const suffixed = brokerSymbols.find(s => s !== g && s.toUpperCase().startsWith(g.toUpperCase()) && s.length <= g.length + 2);
+      if (suffixed) { symbolMap[g] = suffixed; continue; }
       const exact = brokerSymbols.find(s => s === g);
       if (exact) { symbolMap[g] = exact; continue; }
       const match = brokerSymbols.find(s => s.toUpperCase().startsWith(g.toUpperCase()) || s.toUpperCase().includes(g.toUpperCase()));
@@ -114,8 +117,9 @@ async function fetchBrokerSymbols() {
 
 function resolveSymbol(sym) {
   if (!sym) return sym;
-  if (brokerSymbols.includes(sym)) return sym;
+  // Check symbolMap first (prefers suffixed tradeable versions)
   if (symbolMap[sym.toUpperCase()]) return symbolMap[sym.toUpperCase()];
+  if (brokerSymbols.includes(sym)) return sym;
   const upper = sym.toUpperCase();
   const match = brokerSymbols.find(s => s.toUpperCase().startsWith(upper) || s.toUpperCase().includes(upper));
   return match || sym;
