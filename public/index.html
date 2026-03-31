@@ -446,7 +446,7 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
 <div class="modal-overlay" id="settings-modal">
   <div class="modal">
     <h2>⚙️ API Configuration</h2>
-    <div class="warning">⚠️ Keys are stored in your browser's localStorage. Only use on a trusted device.</div>
+    <div class="warning">⚠️ Credentials are kept in memory for this tab only. Save again after refresh.</div>
     <div class="api-status">
       <div class="api-status-dot" id="meta-status-dot"></div>
       <div class="api-status-text" id="meta-status-text">Not configured</div>
@@ -462,6 +462,10 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
     <div class="form-group">
       <label>MT5 Account ID</label>
       <input type="text" id="meta-account" placeholder="a2b3c4d5-..." autocomplete="off" oninput="updateMetaStatus()">
+    </div>
+    <div class="form-group">
+      <label>API Key (X-API-KEY)</label>
+      <input type="password" id="api-key" placeholder="mtrd_..." autocomplete="off" oninput="updateMetaStatus()">
     </div>
     <h3>Journal Persistence</h3>
     <p>Store trade journal on server (optional — resets on redeploy otherwise).</p>
@@ -544,394 +548,637 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
 </div>
 
 <script>
+// ===== STATE =====
+var BASE = '';
+var metaToken = '';
+var metaAccount = '';
+var apiKey = '';
+var adminPassword = '';
+var connected = false;
+var refreshTimer = null;
+var activityLog = [];
+var newKeyJustCreated = null;
+
+// ===== UTIL =====
+function byId(id) { return document.getElementById(id); }
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>'"]/g, function(c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c];
+  });
+}
+function fmtMoney(v) {
+  var num = Number(v || 0);
+  return '$' + num.toFixed(2);
+}
+function setButtonLoading(btn, loadingText, isLoading) {
+  if (!btn) return;
+  if (isLoading) {
+    btn.dataset.prevText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = loadingText;
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.prevText) btn.innerHTML = btn.dataset.prevText;
+  }
+}
+
+function addActivity(method, endpoint, status, message) {
+  var entry = {
+    ts: new Date().toISOString(),
+    method: method,
+    endpoint: endpoint,
+    status: status,
+    message: message || ''
+  };
+  activityLog.unshift(entry);
+  if (activityLog.length > 200) activityLog = activityLog.slice(0, 200);
+  renderActivityLog();
+}
+
+function renderActivityLog() {
+  var logEl = byId('log');
+  if (!logEl) return;
+  if (!activityLog.length) {
+    logEl.innerHTML = '<p style="color:var(--text-faint)">No activity yet.</p>';
+    return;
+  }
+  logEl.innerHTML = activityLog.map(function(item) {
+    var date = new Date(item.ts).toLocaleTimeString();
+    var color = item.status >= 200 && item.status < 300 ? 'var(--green-text)' : (item.status === 0 ? 'var(--yellow)' : 'var(--red-text)');
+    return '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.03)">' +
+      '<span style="color:var(--text-faint)">[' + date + ']</span> ' +
+      '<span style="color:var(--blue)">' + escapeHtml(item.method) + '</span> ' +
+      '<span>' + escapeHtml(item.endpoint) + '</span> ' +
+      '<span style="color:' + color + ';font-weight:600">' + item.status + '</span> ' +
+      '<span style="color:var(--text-muted)">' + escapeHtml(item.message) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function log(msg) {
+  addActivity('INFO', 'frontend', 0, msg);
+}
+
+function clearLog() {
+  activityLog = [];
+  renderActivityLog();
+}
+
+async function apiFetch(path, options) {
+  var opts = options || {};
+  var method = (opts.method || 'GET').toUpperCase();
+  var headers = opts.headers instanceof Headers ? opts.headers : new Headers(opts.headers || {});
+  var isApiRoute = path.indexOf('/api/') === 0;
+  var isKeyManagementRoute = path.indexOf('/api/keys') === 0;
+  if (isApiRoute) {
+    if (!apiKey && !isKeyManagementRoute) {
+      addActivity(method, path, 0, 'Missing API key');
+      throw new Error('Missing API key. Open Settings and save your API key.');
+    }
+    if (apiKey) headers.set('X-API-KEY', apiKey);
+  }
+  opts.headers = headers;
+
+  var response;
+  try {
+    response = await fetch(BASE + path, opts);
+  } catch (error) {
+    addActivity(method, path, 0, error.message);
+    throw error;
+  }
+
+  var data = null;
+  try { data = await response.json(); } catch (_) {}
+
+  addActivity(method, path, response.status, data && data.error ? data.error : (response.ok ? 'ok' : 'request failed'));
+
+  if (!response.ok) {
+    throw new Error((data && data.error) || ('Request failed: ' + response.status));
+  }
+  return data;
+}
+
 // ===== NAV =====
 function showPage(id) {
   document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
-  document.getElementById('page-'+id).classList.add('active');
+  var page = byId('page-' + id);
+  if (page) page.classList.add('active');
+
   document.querySelectorAll('.nav-item').forEach(function(n){ n.classList.remove('active'); });
-  event.currentTarget.classList.add('active');
+  document.querySelectorAll('.nav-item[onclick]').forEach(function(n){
+    if ((n.getAttribute('onclick') || '').indexOf("showPage('" + id + "')") !== -1) n.classList.add('active');
+  });
+
   var titles = {dashboard:'Dashboard',trade:'Market Order',positions:'Positions',journal:'Trade Journal',apikeys:'API Keys',log:'Activity Log'};
-  document.getElementById('page-title').textContent = titles[id] || id;
+  byId('page-title').textContent = titles[id] || id;
   closeSidebar();
 }
-function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-overlay').classList.toggle('open'); }
-function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('mobile-overlay').classList.remove('open'); }
+function toggleSidebar(){ byId('sidebar').classList.toggle('open'); byId('mobile-overlay').classList.toggle('open'); }
+function closeSidebar(){ byId('sidebar').classList.remove('open'); byId('mobile-overlay').classList.remove('open'); }
 
-var BASE = '';
-var _origFetch = window.fetch; window.fetch = function(url, opts) { opts = opts || {}; opts.headers = opts.headers || {}; var k = localStorage.getItem('dashboard_api_key'); if (k && typeof url === 'string' && url.indexOf('/api/') !== -1) { if (opts.headers instanceof Headers) { if (!opts.headers.has('X-API-KEY')) opts.headers.set('X-API-KEY', k); } else { if (!opts.headers['X-API-KEY']) opts.headers['X-API-KEY'] = k; } } return _origFetch.call(window, url, opts); };
-var metaToken = '';
-var metaAccount = '';
-var journalPath = '';
-var connected = false;
-var newKeyJustCreated = null;
-
-// ===== CONNECTION STATUS =====
+// ===== CONNECTION UI =====
 function updateConnUI(state, text) {
-  var dot = document.getElementById('conn-dot');
-  var statusBadge = document.getElementById('conn-status');
-  var statusText = document.getElementById('conn-status-text');
+  var dot = byId('conn-dot');
+  var badge = byId('conn-status');
+  var statusText = byId('conn-status-text');
+
   if (state === 'connected') {
     dot.className = 'conn-dot on';
-    statusBadge.className = 'status connected';
-    statusBadge.textContent = 'Connected';
+    badge.className = 'status connected';
+    badge.textContent = 'Connected';
     statusText.textContent = text || 'Connected';
   } else if (state === 'pending') {
     dot.className = 'conn-dot pending';
-    statusBadge.className = 'status configured';
-    statusBadge.textContent = 'Connecting...';
-    statusText.textContent = text || 'Connecting...';
+    badge.className = 'status configured';
+    badge.textContent = 'Checking...';
+    statusText.textContent = text || 'Checking connection';
   } else {
     dot.className = 'conn-dot off';
-    statusBadge.className = 'status disconnected';
-    statusBadge.textContent = 'Disconnected';
+    badge.className = 'status disconnected';
+    badge.textContent = 'Disconnected';
     statusText.textContent = text || 'Not Connected';
   }
 }
 
-// ===== API KEYS (Modal version) =====
-var ADMIN_PASSWORD = localStorage.getItem('admin_pw') || '';
-function getAdminHeader() { return { 'x-admin-password': ADMIN_PASSWORD }; }
-
-function openApiKeysModal() {
-  if (!ADMIN_PASSWORD) {
-    var pw = prompt('Enter admin password to manage API keys:');
-    if (!pw) return;
-    ADMIN_PASSWORD = pw;
-    localStorage.setItem('admin_pw', pw);
-  }
-  document.getElementById('apikeys-modal').classList.add('open');
-  document.getElementById('new-key-result').style.display = 'none';
-  document.getElementById('new-key-label').value = '';
-  loadApiKeys();
-}
-function closeApiKeysModal() {
-  document.getElementById('apikeys-modal').classList.remove('open');
-  newKeyJustCreated = null;
-  document.getElementById('new-key-result').style.display = 'none';
-}
-
-function loadApiKeys() {
-  fetch(BASE + '/api/keys', { headers: getAdminHeader() }).then(function(r){
-    if (r.status === 401 || r.status === 503) { ADMIN_PASSWORD = ''; localStorage.removeItem('admin_pw'); document.getElementById('api-keys-list').innerHTML = '<p style="color:var(--red);font-size:13px">Auth required. Refresh and re-enter password.</p>'; return; }
-    return r.json();
-  }).then(function(keys){
-    if (!keys) return;
-    renderKeysList(keys, 'api-keys-list');
-    renderKeysList(keys, 'api-keys-list-inline');
-  }).catch(function(e){ document.getElementById('api-keys-list').innerHTML = '<p style="color:var(--red);font-size:13px">Error: '+e.message+'</p>'; });
-}
-
-function renderKeysList(keys, targetId) {
-  var el = document.getElementById(targetId);
-  if (!el) return;
-  if (!keys || keys.length === 0) { el.innerHTML = '<p style="color:var(--text-faint);font-size:13px">No API keys yet.</p>'; return; }
-  el.innerHTML = keys.map(function(k){
-    var status = k.active
-      ? '<span style="background:var(--green-dim);color:var(--green-text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Active</span>'
-      : '<span style="background:var(--red-dim);color:var(--red-text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Revoked</span>';
-    var lastUsed = k.lastUsed ? new Date(k.lastUsed).toLocaleString() : 'Never';
-    return '<div class="pos-item" style="flex-direction:column;align-items:stretch;gap:8px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        '<div><b style="color:var(--text)">'+k.label+'</b> '+status+'</div>' +
-        '<div style="display:flex;gap:6px">' +
-          '<button class="btn btn-ghost btn-xs" onclick="toggleKey(''+k.id+'','+!k.active+')">'+(k.active?'Revoke':'Activate')+'</button>' +
-          '<button class="btn btn-xs" style="background:var(--red-dim);color:var(--red)" onclick="deleteKey(''+k.id+'')">Delete</button>' +
-        '</div>' +
-      '</div>' +
-      '<div style="font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--surface-3);padding:4px 8px;border-radius:4px;display:inline-block">'+k.prefix+'</div>' +
-      '<div style="font-size:11px;color:var(--text-faint)">Created: '+new Date(k.createdAt).toLocaleString()+' · Last used: '+lastUsed+'</div>' +
-    '</div>';
-  }).join('');
-}
-
-function createApiKey() {
-  var label = document.getElementById('new-key-label').value.trim();
-  if (!label) { alert('Enter a label for this key'); return; }
-  fetch(BASE + '/api/keys', {
-    method: 'POST', headers: Object.assign({ 'Content-Type':'application/json' }, getAdminHeader()),
-    body: JSON.stringify({ label: label, permissions: ['read','trade','journal'] })
-  }).then(function(r){ if (r.status === 401 || r.status === 503) { alert('Admin auth failed.'); return null; } return r.json(); }).then(function(data){
-    if (!data || data.error) { alert('Error: ' + (data?data.error:'unknown')); return; }
-    newKeyJustCreated = data.key; localStorage.setItem('dashboard_api_key', data.key);
-    document.getElementById('new-key-value').textContent = data.key;
-    document.getElementById('new-key-result').style.display = 'block';
-    log('API key created: ' + data.label + ' → ' + data.prefix);
-    loadApiKeys();
-  }).catch(function(e){ alert('Error: ' + e.message); });
-}
-
-// Inline version for the API Keys page
-function createApiKeyInline() {
-  if (!ADMIN_PASSWORD) {
-    var pw = prompt('Enter admin password:');
-    if (!pw) return;
-    ADMIN_PASSWORD = pw; localStorage.setItem('admin_pw', pw);
-  }
-  var label = document.getElementById('new-key-label-inline').value.trim();
-  if (!label) { alert('Enter a label'); return; }
-  fetch(BASE + '/api/keys', {
-    method: 'POST', headers: Object.assign({ 'Content-Type':'application/json' }, getAdminHeader()),
-    body: JSON.stringify({ label: label, permissions: ['read','trade','journal'] })
-  }).then(function(r){ if (r.status === 401 || r.status === 503) { alert('Admin auth failed.'); return null; } return r.json(); }).then(function(data){
-    if (!data || data.error) { alert('Error: ' + (data?data.error:'unknown')); return; }
-    newKeyJustCreated = data.key; localStorage.setItem('dashboard_api_key', data.key);
-    document.getElementById('new-key-value-inline').textContent = data.key;
-    document.getElementById('new-key-result-inline').style.display = 'block';
-    document.getElementById('new-key-label-inline').value = '';
-    log('API key created: ' + data.label);
-    loadApiKeys();
-  }).catch(function(e){ alert('Error: ' + e.message); });
-}
-
-function copyNewKey() { if (!newKeyJustCreated) return; navigator.clipboard.writeText(newKeyJustCreated).then(function(){ log('Key copied'); }).catch(function(){ prompt('Copy:', newKeyJustCreated); }); }
-function copyNewKeyInline() { copyNewKey(); }
-
-function toggleKey(id, activate) {
-  fetch(BASE + '/api/keys/' + id, { method: 'PATCH', headers: Object.assign({ 'Content-Type':'application/json' }, getAdminHeader()), body: JSON.stringify({ active: activate }) })
-  .then(function(r){ return r.json(); }).then(function(){ log('API key ' + (activate ? 'activated' : 'revoked')); loadApiKeys(); }).catch(function(e){ alert('Error: ' + e.message); });
-}
-function deleteKey(id) {
-  if (!confirm('Delete this API key permanently?')) return;
-  fetch(BASE + '/api/keys/' + id, { method: 'DELETE', headers: getAdminHeader() }).then(function(r){ return r.json(); }).then(function(){ log('API key deleted'); loadApiKeys(); }).catch(function(e){ alert('Error: ' + e.message); });
-}
-function revokeAllKeys() {
-  if (!confirm('Revoke ALL API keys?')) return;
-  fetch(BASE + '/api/keys', { method: 'DELETE', headers: getAdminHeader() }).then(function(r){ return r.json(); }).then(function(data){ log('All ' + (data.revoked||0) + ' keys revoked'); loadApiKeys(); }).catch(function(e){ alert('Error: ' + e.message); });
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(function() {
+    if (connected) refreshAll();
+  }, 30000);
 }
 
 // ===== SETTINGS =====
 function openModal() {
-  document.getElementById('settings-modal').classList.add('open');
-  var saved = localStorage.getItem('metaapi_config');
-  if (saved) { var cfg = JSON.parse(saved); document.getElementById('meta-token').value = cfg.token || ''; document.getElementById('meta-account').value = cfg.account || ''; document.getElementById('journal-path').value = cfg.journalPath || ''; }
+  byId('settings-modal').classList.add('open');
+  byId('meta-token').value = metaToken;
+  byId('meta-account').value = metaAccount;
+  byId('api-key').value = apiKey;
   updateMetaStatus();
 }
-function closeModal() { document.getElementById('settings-modal').classList.remove('open'); }
+function closeModal() { byId('settings-modal').classList.remove('open'); }
 
 function updateMetaStatus() {
-  var token = document.getElementById('meta-token').value;
-  var account = document.getElementById('meta-account').value;
-  var dot = document.getElementById('meta-status-dot');
-  var text = document.getElementById('meta-status-text');
-  var preview = document.getElementById('meta-token-preview');
-  if (token && account) { dot.className = 'api-status-dot yellow'; text.textContent = 'Ready to connect (' + token.substring(0, 8) + '...)'; preview.textContent = token.length > 20 ? 'Token: ' + token.substring(0, 20) + '...' : ''; }
-  else if (token) { dot.className = 'api-status-dot yellow'; text.textContent = 'Token set, add Account ID'; preview.textContent = token.substring(0, 30) + '...'; }
-  else { dot.className = 'api-status-dot red'; text.textContent = 'Not configured'; preview.textContent = ''; }
-}
-function clearMetaKeys() { localStorage.removeItem('metaapi_config'); document.getElementById('meta-token').value = ''; document.getElementById('meta-account').value = ''; document.getElementById('journal-path').value = ''; updateMetaStatus(); log('API keys cleared'); }
+  var token = byId('meta-token').value.trim();
+  var account = byId('meta-account').value.trim();
+  var key = byId('api-key').value.trim();
+  var dot = byId('meta-status-dot');
+  var text = byId('meta-status-text');
+  var preview = byId('meta-token-preview');
 
-function saveSettings() {
-  var token = document.getElementById('meta-token').value.trim();
-  var account = document.getElementById('meta-account').value.trim();
-  var jPath = document.getElementById('journal-path').value.trim();
-  if (!token || !account) { alert('Enter both MetaApi Token and Account ID'); return; }
-  localStorage.setItem('metaapi_config', JSON.stringify({ token: token, account: account, journalPath: jPath }));
-  metaToken = token; metaAccount = account; journalPath = jPath;
-  log('Connecting to MetaApi...');
-  closeModal(); initConnection();
-}
-
-// ===== JOURNAL =====
-function openJournalEntry() { document.getElementById('journal-modal').classList.add('open'); }
-function closeJournalModal() { document.getElementById('journal-modal').classList.remove('open'); }
-
-function submitJournalEntry() {
-  var entry = { symbol: document.getElementById('j-symbol').value, type: document.getElementById('j-type').value, volume: parseFloat(document.getElementById('j-volume').value) || 0, pnl: parseFloat(document.getElementById('j-pnl').value) || 0, setup: document.getElementById('j-setup').value, tags: document.getElementById('j-tags').value.split(',').map(function(t){ return t.trim(); }).filter(function(t){ return t; }), date: new Date().toISOString(), notes: '' };
-  fetch(BASE + '/api/journal', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(entry) }).then(function(r){ return r.json(); }).then(function(d){
-    log('Journal: ' + entry.symbol + ' ' + entry.type + ' $' + entry.pnl);
-    closeJournalModal(); fetchJournal();
-    document.getElementById('j-symbol').value = ''; document.getElementById('j-pnl').value = ''; document.getElementById('j-setup').value = ''; document.getElementById('j-tags').value = '';
-  }).catch(function(e){ log('Journal error: ' + e.message); });
-}
-
-function fetchJournal() {
-  fetch(BASE + '/api/journal').then(function(r){ return r.json(); }).then(function(d){
-    if (!d || !d.length) return;
-    var wins = d.filter(function(e){ return e.pnl > 0; }).length;
-    var total = d.length;
-    var totalPnl = d.reduce(function(s,e){ return s + (e.pnl||0); }, 0);
-    document.getElementById('journal-stats').innerHTML =
-      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Trades</div><div class="kpi-value" style="font-size:18px">'+total+'</div></div>' +
-      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Wins</div><div class="kpi-value profit" style="font-size:18px">'+wins+'</div></div>' +
-      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Total P&L</div><div class="kpi-value '+(totalPnl>=0?'profit':'loss')+'" style="font-size:18px">$'+(totalPnl>=0?'+':'')+totalPnl.toFixed(2)+'</div></div>';
-    document.getElementById('journal-list').innerHTML = d.slice(-15).reverse().map(function(e){
-      var c = e.pnl >= 0 ? 'profit' : 'loss';
-      return '<div class="pos-item" style="flex-direction:column;align-items:stretch;gap:4px">' +
-        '<div style="display:flex;justify-content:space-between"><span><b>'+e.symbol+'</b> <span style="color:var(--text-muted);font-size:12px">'+e.type.toUpperCase()+'</span></span><span class="'+c+'" style="font-weight:600">$'+(e.pnl||0).toFixed(2)+'</span></div>' +
-        '<div style="color:var(--text-faint);font-size:12px">'+(e.setup||'')+(e.tags&&e.tags.length?' · #'+e.tags.join(' #'):'')+'</div></div>';
-    }).join('');
-  }).catch(function(e){});
-}
-
-// ===== CONNECTION =====
-function initConnection() {
-  if (!metaToken || !metaAccount) {
-    var saved = localStorage.getItem('metaapi_config');
-    if (saved) { var cfg = JSON.parse(saved); metaToken = cfg.token; metaAccount = cfg.account; journalPath = cfg.journalPath || ''; }
+  if (token && account && key) {
+    dot.className = 'api-status-dot yellow';
+    text.textContent = 'Ready to verify credentials';
+    preview.textContent = 'Token: ' + token.slice(0, 10) + '... · Key: ' + key.slice(0, 10) + '...';
+  } else {
+    dot.className = 'api-status-dot red';
+    text.textContent = 'Missing required credentials';
+    preview.textContent = '';
   }
-  if (!metaToken || !metaAccount) { log('No API keys — open Settings'); updateConnUI('off'); return; }
-  updateConnUI('pending', 'Connecting...');
-  log('Initializing MetaApi...');
-  fetch(BASE + '/api/init', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ token: metaToken, accountId: metaAccount, journalPath: journalPath }) })
-  .then(function(r){ return r.json(); }).then(function(d){
-    if (d.error) { log('Failed: ' + d.error); updateConnUI('off', 'Failed'); return; }
-    log('Connected! Server: ' + d.server);
-    updateConnUI('connected', d.server || 'Connected');
-    connected = true; refreshAll();
-  }).catch(function(e){ log('Error: ' + e.message); updateConnUI('off', 'Error'); });
 }
 
-// ===== LOGGING =====
-function log(msg) {
-  var el = document.getElementById('log');
-  var time = new Date().toLocaleTimeString();
-  el.innerHTML = '<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)"><span style="color:var(--text-faint)">['+time+']</span> ' + msg + '</div>' + el.innerHTML;
-  if (el.innerHTML.length > 5000) el.innerHTML = el.innerHTML.substring(0, 5000);
-}
-function clearLog() { document.getElementById('log').innerHTML = ''; }
-
-// ===== DATA FETCHING =====
-function refreshAll() { log('Refreshing...'); fetchAccount(); fetchPositions(); fetchOrders(); fetchHistory(); fetchJournal(); }
-
-function getPrice() {
-  var sym = document.getElementById('price-symbol').value;
-  log('Price: ' + sym + '...');
-  fetch(BASE + '/api/price/' + sym).then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Price error: ' + d.error); return; }
-    var spread = d.ask && d.bid ? ((d.ask - d.bid) * 100000).toFixed(1) : '?';
-    document.getElementById('price-display').innerHTML =
-      '<div class="price-row"><div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">BID</div><span class="price-bid">' + (d.bid || 'N/A') + '</span></div>' +
-      '<div class="price-divider"></div>' +
-      '<div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">ASK</div><span class="price-ask">' + (d.ask || 'N/A') + '</span></div></div>' +
-      '<div class="price-spread">Spread: ' + spread + ' pts · ' + sym + '</div>';
-    log(sym + ' Bid:' + (d.bid||0).toFixed(5) + ' Ask:' + (d.ask||0).toFixed(5));
-  }).catch(function(e){ log('Price error: ' + e.message); });
+function clearMetaKeys() {
+  metaToken = '';
+  metaAccount = '';
+  apiKey = '';
+  byId('meta-token').value = '';
+  byId('meta-account').value = '';
+  byId('api-key').value = '';
+  connected = false;
+  updateConnUI('off', 'Not Connected');
+  updateMetaStatus();
 }
 
-function fetchAccount() {
-  fetch(BASE + '/api/account').then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Account error: ' + d.error); return; }
-    updateConnUI('connected');
-    var pClass = (d.profit >= 0) ? 'profit' : 'loss';
-    // KPIs
-    document.getElementById('kpi-balance').textContent = '$' + (d.balance || 0).toFixed(2);
-    document.getElementById('kpi-equity').textContent = '$' + (d.equity || 0).toFixed(2);
-    var pnlEl = document.getElementById('kpi-pnl');
-    pnlEl.textContent = '$' + (d.profit || 0).toFixed(2);
-    pnlEl.className = 'kpi-value ' + pClass;
-    document.getElementById('kpi-margin').textContent = '$' + (d.freeMargin || 0).toFixed(2);
-    // Account card
-    document.getElementById('account-info').innerHTML =
-      '<div class="stat-row"><span class="stat-label">Balance</span><span class="stat-value">$' + (d.balance || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Equity</span><span class="stat-value">$' + (d.equity || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">P&L</span><span class="stat-value ' + pClass + '">$' + (d.profit || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Margin</span><span class="stat-value">$' + (d.margin || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Free Margin</span><span class="stat-value">$' + (d.freeMargin || 0).toFixed(2) + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Leverage</span><span class="stat-value">1:' + d.leverage + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Server</span><span class="stat-value">' + (d.server || '') + '</span></div>';
-    log('Balance: $' + (d.balance || 0).toFixed(2));
-  }).catch(function(e){ log('Account error: ' + e.message); });
-}
+async function saveSettings() {
+  var btn = document.querySelector('#settings-modal .btn-success');
+  setButtonLoading(btn, 'Saving...', true);
+  try {
+    var token = byId('meta-token').value.trim();
+    var account = byId('meta-account').value.trim();
+    var key = byId('api-key').value.trim();
 
-function fetchPositions() {
-  fetch(BASE + '/api/positions').then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Positions error: ' + d.error); return; }
-    var html;
-    if (!d || !d.length) { html = '<p style="color:var(--text-faint)">No open positions</p>'; }
-    else {
-      html = d.map(function(p){
-        var pClass = (p.profit >= 0) ? 'profit' : 'loss';
-        return '<div class="pos-item"><div><div class="pos-symbol">' + p.symbol + '</div><div class="pos-meta">' + p.type + ' · ' + p.volume + ' lots</div></div><div style="text-align:right"><div class="pos-pnl ' + pClass + '">$' + (p.profit || 0).toFixed(2) + '</div><button class="btn btn-xs" style="background:var(--red-dim);color:var(--red);margin-top:4px" onclick="closePos('' + p.id + '')">Close</button></div></div>';
-      }).join('');
+    if (!token || !account || !key) {
+      throw new Error('MetaApi Token, Account ID, and API Key are required.');
     }
-    document.getElementById('positions-list').innerHTML = html;
-    if (document.getElementById('positions-list-full')) document.getElementById('positions-list-full').innerHTML = html;
-    if (d && d.length) log('Positions: ' + d.length + ' open');
-  }).catch(function(e){});
+
+    metaToken = token;
+    metaAccount = account;
+    apiKey = key;
+
+    updateConnUI('pending', 'Verifying API key...');
+    var health = await apiFetch('/api/health');
+
+    connected = !!health.connected;
+    updateConnUI(connected ? 'connected' : 'off', connected ? 'Connected' : 'API reachable, MetaApi disconnected');
+    closeModal();
+    await refreshAll();
+  } catch (error) {
+    connected = false;
+    updateConnUI('off', error.message);
+    alert(error.message);
+  } finally {
+    setButtonLoading(btn, 'Saving...', false);
+  }
 }
 
-function fetchOrders() {
-  fetch(BASE + '/api/orders').then(function(r){return r.json()}).then(function(d){
-    if (d.error) return;
-    var el = document.getElementById('orders-list');
-    if (!d || !d.length) { el.innerHTML = '<p style="color:var(--text-faint)">No pending orders</p>'; return; }
-    el.innerHTML = d.map(function(o){ return '<div class="pos-item"><div><div class="pos-symbol">' + o.symbol + '</div><div class="pos-meta">' + o.type + ' · ' + o.volume + ' lots @ ' + (o.price||o.openPrice||'N/A') + '</div></div></div>'; }).join('');
-  }).catch(function(e){});
+// ===== DASHBOARD =====
+async function fetchHealth() {
+  try {
+    var health = await apiFetch('/api/health');
+    connected = !!health.connected;
+    updateConnUI(connected ? 'connected' : 'off', connected ? (health.server || 'Connected') : 'MetaApi disconnected');
+    return health;
+  } catch (error) {
+    connected = false;
+    updateConnUI('off', error.message);
+    throw error;
+  }
 }
 
-function fetchHistory() {
-  fetch(BASE + '/api/history').then(function(r){return r.json()}).then(function(d){
-    if (d.error) return;
-    var el = document.getElementById('history-list');
-    if (!d || !d.length) { el.innerHTML = '<p style="color:var(--text-faint)">No recent deals</p>'; return; }
-    el.innerHTML = d.slice(0,20).map(function(h){
-      return '<div class="pos-item"><div><div class="pos-symbol">' + (h.symbol||'') + '</div><div class="pos-meta">' + (h.type||'') + '</div></div><div class="pos-pnl ' + ((h.profit >= 0) ? 'profit' : 'loss') + '">$' + (h.profit || 0).toFixed(2) + '</div></div>';
-    }).join('');
-    log('History: ' + d.length + ' deals');
-  }).catch(function(e){});
+async function fetchAccount() {
+  var accountInfo = byId('account-info');
+  accountInfo.innerHTML = '<p style="color:var(--text-faint)">Loading account...</p>';
+  try {
+    var d = await apiFetch('/api/account');
+    var pClass = (d.profit >= 0) ? 'profit' : 'loss';
+    byId('kpi-balance').textContent = fmtMoney(d.balance);
+    byId('kpi-equity').textContent = fmtMoney(d.equity);
+    byId('kpi-pnl').textContent = fmtMoney(d.profit);
+    byId('kpi-pnl').className = 'kpi-value ' + pClass;
+    byId('kpi-margin').textContent = fmtMoney(d.freeMargin);
+
+    accountInfo.innerHTML =
+      '<div class="stat-row"><span class="stat-label">Balance</span><span class="stat-value">' + fmtMoney(d.balance) + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">Equity</span><span class="stat-value">' + fmtMoney(d.equity) + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">P&L</span><span class="stat-value ' + pClass + '">' + fmtMoney(d.profit) + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">Margin</span><span class="stat-value">' + fmtMoney(d.margin) + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">Free Margin</span><span class="stat-value">' + fmtMoney(d.freeMargin) + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">Leverage</span><span class="stat-value">1:' + escapeHtml(d.leverage) + '</span></div>';
+  } catch (error) {
+    accountInfo.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+// ===== LIVE PRICE =====
+async function getPrice() {
+  var sym = byId('price-symbol').value;
+  var display = byId('price-display');
+  display.innerHTML = '<p style="color:var(--text-faint)">Loading ' + escapeHtml(sym) + '...</p>';
+  try {
+    var d = await apiFetch('/api/price/' + encodeURIComponent(sym));
+    var spread = d.spread || (d.ask && d.bid ? ((d.ask - d.bid) * 100000).toFixed(1) : 'N/A');
+    display.innerHTML =
+      '<div class="price-row"><div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">BID</div><span class="price-bid">' + escapeHtml(d.bid) + '</span></div>' +
+      '<div class="price-divider"></div>' +
+      '<div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">ASK</div><span class="price-ask">' + escapeHtml(d.ask) + '</span></div></div>' +
+      '<div class="price-spread">Spread: ' + escapeHtml(spread) + ' · ' + escapeHtml(sym) + '</div>';
+  } catch (error) {
+    display.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
 }
 
 // ===== TRADING =====
-function placeTrade(type, vol) {
-  var symbol = document.getElementById('symbol').value;
-  var volume = vol || parseFloat(document.getElementById('volume').value);
-  var sl = parseFloat(document.getElementById('sl').value) || undefined;
-  var tp = parseFloat(document.getElementById('tp').value) || undefined;
-  log(type.toUpperCase() + ' ' + volume + ' ' + symbol + '...');
-  fetch(BASE + '/api/trade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ symbol: symbol, type: type, volume: volume, stopLoss: sl, takeProfit: tp }) })
-  .then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Trade error: ' + d.error); document.getElementById('trade-result').innerHTML = '<span class="loss">' + d.error + '</span>'; return; }
-    log('Executed: ' + type.toUpperCase() + ' ' + volume + ' ' + symbol);
-    document.getElementById('trade-result').innerHTML = '<span class="profit" style="font-weight:600">✓ Order placed!</span>';
-    setTimeout(function(){ fetchPositions(); fetchAccount(); fetchJournal(); }, 2000);
-  }).catch(function(e){ log('Trade error: ' + e.message); });
+async function placeTrade(type, volumeOverride) {
+  var symbol = byId('symbol').value;
+  var volume = volumeOverride || parseFloat(byId('volume').value);
+  var sl = byId('sl').value ? parseFloat(byId('sl').value) : undefined;
+  var tp = byId('tp').value ? parseFloat(byId('tp').value) : undefined;
+  var resultEl = byId('trade-result');
+
+  if (!volume || volume <= 0) {
+    resultEl.innerHTML = '<span class="loss">Volume must be greater than 0.</span>';
+    return;
+  }
+
+  resultEl.innerHTML = '<span style="color:var(--text-faint)">Submitting...</span>';
+  try {
+    await apiFetch('/api/trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: symbol, type: type, volume: volume, stopLoss: sl, takeProfit: tp })
+    });
+    resultEl.innerHTML = '<span class="profit" style="font-weight:600">✓ Order placed!</span>';
+    await fetchPositions();
+    await fetchAccount();
+  } catch (error) {
+    resultEl.innerHTML = '<span class="loss">' + escapeHtml(error.message) + '</span>';
+  }
 }
 
 function quickTrade(type, vol) {
-  var symbol = document.getElementById('price-symbol').value;
-  log('Quick ' + type.toUpperCase() + ' ' + vol + ' ' + symbol + '...');
-  fetch(BASE + '/api/trade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ symbol: symbol, type: type, volume: vol }) })
-  .then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Error: ' + d.error); return; }
-    log('Quick trade: ' + type.toUpperCase() + ' ' + vol + ' ' + symbol);
-    setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
-  }).catch(function(e){ log('Error: ' + e.message); });
+  byId('symbol').value = byId('price-symbol').value;
+  return placeTrade(type, vol);
 }
 
-function closePos(id) {
-  log('Closing ' + id + '...');
-  fetch(BASE + '/api/close/' + id, { method: 'POST' }).then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Close error: ' + d.error); return; }
-    log('Position closed'); setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
-  }).catch(function(e){ log('Error: ' + e.message); });
+async function closePos(id) {
+  try {
+    await apiFetch('/api/close/' + encodeURIComponent(id), { method: 'POST' });
+    await fetchPositions();
+    await fetchAccount();
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
-function closeAllPositions() {
+async function closeAllPositions() {
   if (!confirm('Close ALL positions?')) return;
-  log('Closing all...');
-  fetch(BASE + '/api/close-all', { method: 'POST' }).then(function(r){return r.json()}).then(function(d){
-    if (d.error) { log('Error: ' + d.error); return; }
-    log('Closed ' + (d.closed||d.results?.length||'?') + ' positions');
-    setTimeout(function(){ fetchPositions(); fetchAccount(); }, 2000);
-  }).catch(function(e){ log('Error: ' + e.message); });
+  try {
+    await apiFetch('/api/close-all', { method: 'POST' });
+    await fetchPositions();
+    await fetchAccount();
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
-function loadApiKeysSummary() {}
+// ===== POSITIONS =====
+async function fetchPositions() {
+  var list = byId('positions-list');
+  var full = byId('positions-list-full');
+  list.innerHTML = '<p style="color:var(--text-faint)">Loading positions...</p>';
+  if (full) full.innerHTML = '<p style="color:var(--text-faint)">Loading positions...</p>';
+
+  try {
+    var d = await apiFetch('/api/positions');
+    var html = '';
+    if (!d || !d.length) {
+      html = '<p style="color:var(--text-faint)">No open positions</p>';
+    } else {
+      html = d.map(function(p) {
+        var pClass = p.profit >= 0 ? 'profit' : 'loss';
+        return '<div class="pos-item"><div><div class="pos-symbol">' + escapeHtml(p.symbol) + '</div><div class="pos-meta">' + escapeHtml(p.type) + ' · ' + escapeHtml(p.volume) + ' lots</div></div>' +
+          '<div style="text-align:right"><div class="pos-pnl ' + pClass + '">' + fmtMoney(p.profit) + '</div>' +
+          '<button class="btn btn-xs" style="background:var(--red-dim);color:var(--red);margin-top:4px" data-id="' + escapeHtml(p.id) + '" onclick="closePos(this.dataset.id)">Close</button></div></div>';
+      }).join('');
+    }
+    list.innerHTML = html;
+    if (full) {
+      if (!d || !d.length) {
+        full.innerHTML = '<p style="color:var(--text-faint)">No open positions</p>';
+      } else {
+        full.innerHTML =
+          '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
+          '<thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:8px">Symbol</th><th style="text-align:left;padding:8px">Type</th><th style="text-align:right;padding:8px">Volume</th><th style="text-align:right;padding:8px">Open</th><th style="text-align:right;padding:8px">Current</th><th style="text-align:right;padding:8px">P&L</th><th style="text-align:right;padding:8px">Action</th></tr></thead><tbody>' +
+          d.map(function(p) {
+            var pClass = p.profit >= 0 ? 'profit' : 'loss';
+            return '<tr style="border-bottom:1px solid rgba(255,255,255,.05)">' +
+              '<td style="padding:8px">' + escapeHtml(p.symbol) + '</td>' +
+              '<td style="padding:8px">' + escapeHtml(p.type) + '</td>' +
+              '<td style="padding:8px;text-align:right">' + escapeHtml(p.volume) + '</td>' +
+              '<td style="padding:8px;text-align:right">' + escapeHtml(p.openPrice || '-') + '</td>' +
+              '<td style="padding:8px;text-align:right">' + escapeHtml(p.currentPrice || '-') + '</td>' +
+              '<td style="padding:8px;text-align:right" class="' + pClass + '">' + fmtMoney(p.profit) + '</td>' +
+              '<td style="padding:8px;text-align:right"><button class="btn btn-xs" style="background:var(--red-dim);color:var(--red)" data-id="' + escapeHtml(p.id) + '" onclick="closePos(this.dataset.id)">Close</button></td>' +
+            '</tr>';
+          }).join('') +
+          '</tbody></table></div>';
+      }
+    }
+  } catch (error) {
+    var err = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+    list.innerHTML = err;
+    if (full) full.innerHTML = err;
+  }
+}
+
+async function fetchOrders() {
+  var el = byId('orders-list');
+  el.innerHTML = '<p style="color:var(--text-faint)">Loading orders...</p>';
+  try {
+    var d = await apiFetch('/api/orders');
+    if (!d || !d.length) {
+      el.innerHTML = '<p style="color:var(--text-faint)">No pending orders</p>';
+      return;
+    }
+    el.innerHTML = d.map(function(o) {
+      return '<div class="pos-item"><div><div class="pos-symbol">' + escapeHtml(o.symbol) + '</div><div class="pos-meta">' + escapeHtml(o.type) + ' · ' + escapeHtml(o.volume) + ' lots @ ' + escapeHtml(o.price || o.openPrice || 'N/A') + '</div></div></div>';
+    }).join('');
+  } catch (error) {
+    el.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+async function fetchHistory() {
+  var el = byId('history-list');
+  el.innerHTML = '<p style="color:var(--text-faint)">Loading deals...</p>';
+  try {
+    var d = await apiFetch('/api/history');
+    if (!d || !d.length) {
+      el.innerHTML = '<p style="color:var(--text-faint)">No recent deals</p>';
+      return;
+    }
+    el.innerHTML = d.slice(0, 20).map(function(h) {
+      var c = h.profit >= 0 ? 'profit' : 'loss';
+      return '<div class="pos-item"><div><div class="pos-symbol">' + escapeHtml(h.symbol || '') + '</div><div class="pos-meta">' + escapeHtml(h.type || '') + '</div></div><div class="pos-pnl ' + c + '">' + fmtMoney(h.profit) + '</div></div>';
+    }).join('');
+  } catch (error) {
+    el.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+// ===== JOURNAL =====
+function openJournalEntry() { byId('journal-modal').classList.add('open'); }
+function closeJournalModal() { byId('journal-modal').classList.remove('open'); }
+
+async function submitJournalEntry() {
+  var entry = {
+    symbol: byId('j-symbol').value.trim(),
+    type: byId('j-type').value,
+    volume: parseFloat(byId('j-volume').value) || 0,
+    pnl: parseFloat(byId('j-pnl').value) || 0,
+    setup: byId('j-setup').value.trim(),
+    tags: byId('j-tags').value.split(',').map(function(t){ return t.trim(); }).filter(Boolean),
+    date: new Date().toISOString(),
+    notes: ''
+  };
+  try {
+    await apiFetch('/api/journal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry)
+    });
+    closeJournalModal();
+    byId('j-symbol').value = '';
+    byId('j-pnl').value = '';
+    byId('j-setup').value = '';
+    byId('j-tags').value = '';
+    await fetchJournal();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function fetchJournal() {
+  var listEl = byId('journal-list');
+  var statsEl = byId('journal-stats');
+  listEl.innerHTML = '<p style="color:var(--text-faint)">Loading journal...</p>';
+  statsEl.innerHTML = '';
+  try {
+    var data = await apiFetch('/api/journal');
+    var stats = await apiFetch('/api/journal/stats');
+
+    statsEl.innerHTML =
+      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Trades</div><div class="kpi-value" style="font-size:18px">' + escapeHtml(stats.total || 0) + '</div></div>' +
+      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Win Rate</div><div class="kpi-value profit" style="font-size:18px">' + escapeHtml(stats.winRate || '0') + '%</div></div>' +
+      '<div class="card kpi" style="padding:12px 16px;flex:1;min-width:100px"><div class="kpi-label">Total P&L</div><div class="kpi-value ' + ((Number(stats.totalPnl) || 0) >= 0 ? 'profit' : 'loss') + '" style="font-size:18px">$' + escapeHtml(stats.totalPnl || '0.00') + '</div></div>';
+
+    if (!data || !data.length) {
+      listEl.innerHTML = '<p style="color:var(--text-faint)">No journal entries</p>';
+      return;
+    }
+
+    listEl.innerHTML = data.map(function(e) {
+      var c = e.pnl >= 0 ? 'profit' : 'loss';
+      return '<div class="pos-item" style="flex-direction:column;align-items:stretch;gap:4px">' +
+        '<div style="display:flex;justify-content:space-between"><span><b>' + escapeHtml(e.symbol || '-') + '</b> <span style="color:var(--text-muted);font-size:12px">' + escapeHtml((e.type || '').toUpperCase()) + '</span></span><span class="' + c + '" style="font-weight:600">' + fmtMoney(e.pnl) + '</span></div>' +
+        '<div style="color:var(--text-faint);font-size:12px">' + escapeHtml(e.setup || '') + (e.tags && e.tags.length ? ' · #' + e.tags.map(escapeHtml).join(' #') : '') + '</div></div>';
+    }).join('');
+  } catch (error) {
+    listEl.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+// ===== API KEYS =====
+function getAdminHeader() {
+  if (!adminPassword) {
+    adminPassword = prompt('Enter admin password for API key management:') || '';
+  }
+  return { 'x-admin-password': adminPassword };
+}
+
+function renderKeysList(keys, targetId) {
+  var el = byId(targetId);
+  if (!el) return;
+  if (!keys || !keys.length) {
+    el.innerHTML = '<p style="color:var(--text-faint);font-size:13px">No API keys yet.</p>';
+    return;
+  }
+
+  el.innerHTML = keys.map(function(k) {
+    var status = k.active
+      ? '<span style="background:var(--green-dim);color:var(--green-text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Active</span>'
+      : '<span style="background:var(--red-dim);color:var(--red-text);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">Revoked</span>';
+    var actionLabel = k.active ? 'Revoke' : 'Activate';
+    return '<div class="pos-item" style="flex-direction:column;align-items:stretch;gap:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div><b style="color:var(--text)">' + escapeHtml(k.label) + '</b> ' + status + '</div>' +
+      '<div style="display:flex;gap:6px">' +
+      '<button class="btn btn-ghost btn-xs" data-id="' + escapeHtml(k.id) + '" onclick="toggleKey(this.dataset.id,' + (!k.active) + ')">' + actionLabel + '</button>' +
+      '<button class="btn btn-xs" style="background:var(--red-dim);color:var(--red)" data-id="' + escapeHtml(k.id) + '" onclick="deleteKey(this.dataset.id)">Delete</button>' +
+      '</div></div>' +
+      '<div style="font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--surface-3);padding:4px 8px;border-radius:4px;display:inline-block">' + escapeHtml(k.prefix || '') + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+async function loadApiKeys() {
+  try {
+    var keys = await apiFetch('/api/keys', { headers: getAdminHeader() });
+    renderKeysList(keys, 'api-keys-list');
+    renderKeysList(keys, 'api-keys-list-inline');
+  } catch (error) {
+    byId('api-keys-list-inline').innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+    byId('api-keys-list').innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+function openApiKeysModal() {
+  byId('apikeys-modal').classList.add('open');
+  loadApiKeys();
+}
+function closeApiKeysModal() {
+  byId('apikeys-modal').classList.remove('open');
+}
+
+async function createApiKey() {
+  var label = byId('new-key-label').value.trim();
+  if (!label) return alert('Enter a label for this key');
+  try {
+    var data = await apiFetch('/api/keys', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, getAdminHeader()),
+      body: JSON.stringify({ label: label, permissions: ['read', 'trade', 'journal'] })
+    });
+    newKeyJustCreated = data.key;
+    byId('new-key-value').textContent = data.key;
+    byId('new-key-result').style.display = 'block';
+    loadApiKeys();
+  } catch (error) { alert(error.message); }
+}
+
+async function createApiKeyInline() {
+  var label = byId('new-key-label-inline').value.trim();
+  if (!label) return alert('Enter a label');
+  try {
+    var data = await apiFetch('/api/keys', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, getAdminHeader()),
+      body: JSON.stringify({ label: label, permissions: ['read', 'trade', 'journal'] })
+    });
+    newKeyJustCreated = data.key;
+    byId('new-key-value-inline').textContent = data.key;
+    byId('new-key-result-inline').style.display = 'block';
+    byId('new-key-label-inline').value = '';
+    loadApiKeys();
+  } catch (error) { alert(error.message); }
+}
+
+function copyNewKey() {
+  if (!newKeyJustCreated) return;
+  navigator.clipboard.writeText(newKeyJustCreated).catch(function() { prompt('Copy key:', newKeyJustCreated); });
+}
+function copyNewKeyInline() { copyNewKey(); }
+
+async function toggleKey(id, active) {
+  try {
+    await apiFetch('/api/keys/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, getAdminHeader()),
+      body: JSON.stringify({ active: active })
+    });
+    loadApiKeys();
+  } catch (error) { alert(error.message); }
+}
+
+async function deleteKey(id) {
+  if (!confirm('Delete this API key permanently?')) return;
+  try {
+    await apiFetch('/api/keys/' + encodeURIComponent(id), { method: 'DELETE', headers: getAdminHeader() });
+    loadApiKeys();
+  } catch (error) { alert(error.message); }
+}
+
+async function revokeAllKeys() {
+  if (!confirm('Revoke ALL API keys?')) return;
+  try {
+    await apiFetch('/api/keys', { method: 'DELETE', headers: getAdminHeader() });
+    loadApiKeys();
+  } catch (error) { alert(error.message); }
+}
+
+// ===== REFRESH =====
+async function refreshAll() {
+  if (!apiKey) return;
+  var health = await fetchHealth();
+  if (!health.connected) return;
+  await Promise.allSettled([
+    fetchAccount(),
+    fetchPositions(),
+    fetchOrders(),
+    fetchHistory(),
+    fetchJournal()
+  ]);
+}
 
 // ===== INIT =====
-window.addEventListener('load', function(){
-  var saved = localStorage.getItem('metaapi_config');
-  if (saved) {
-    var cfg = JSON.parse(saved);
-    metaToken = cfg.token || '';
-    localStorage.setItem('dashboard_api_key', 'mtrd_96e2012a9cd2ecfe0505e00a81f62e9dd60b42d69272a711');
-    metaAccount = cfg.account || '';
-    journalPath = cfg.journalPath || '';
-    if (metaToken && metaAccount) { log('Auto-connecting...'); initConnection(); }
-    else { log('Configure API keys in Settings'); }
-  } else { log('Open Settings ⚙️ to connect'); }
+window.addEventListener('load', function() {
+  byId('price-symbol').addEventListener('change', getPrice);
+  byId('meta-token').addEventListener('input', updateMetaStatus);
+  byId('meta-account').addEventListener('input', updateMetaStatus);
+  byId('api-key').addEventListener('input', updateMetaStatus);
+  renderActivityLog();
+  updateConnUI('off', 'Not Connected');
+  startAutoRefresh();
+  byId('account-info').innerHTML = '<p style="color:var(--text-faint)">Configure credentials in Settings to connect.</p>';
 });
-
-setInterval(function(){ if (connected) { fetchAccount(); fetchPositions(); fetchOrders(); } }, 30000);
 </script>
 </body></html>
