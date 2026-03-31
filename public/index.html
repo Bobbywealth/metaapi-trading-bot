@@ -4,6 +4,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -108,6 +109,16 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
 .price-row{display:flex;justify-content:space-around;align-items:center;gap:16px}
 .price-divider{width:1px;height:40px;background:var(--border)}
 
+/* Chart */
+.chart-container{background:var(--surface-2);border-radius:var(--radius);padding:12px;margin-bottom:12px}
+#price-chart{width:100%;height:200px;border-radius:var(--radius-sm)}
+.chart-controls{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.chart-legend{font-size:12px;color:var(--text-muted);margin-top:6px}
+.price-ask{color:var(--red);font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.price-spread{color:var(--text-faint);font-size:11px;margin-top:4px}
+.price-row{display:flex;justify-content:space-around;align-items:center;gap:16px}
+.price-divider{width:1px;height:40px;background:var(--border)}
+
 /* Quick Trade Buttons */
 .quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 
@@ -187,7 +198,7 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
   .grid-3{grid-template-columns:1fr 1fr}
   .grid-4{grid-template-columns:1fr 1fr}
 }
-</style></head><body>
+</style></head><body onload="initApp()">
 
 <!-- Mobile overlay -->
 <div class="mobile-overlay" id="mobile-overlay" onclick="closeSidebar()"></div>
@@ -288,14 +299,18 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
         </div>
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Live Price</span>
+            <span class="card-title">Live Price Chart</span>
             <button class="btn btn-ghost btn-xs" onclick="getPrice()">Refresh</button>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+          <div class="chart-controls">
             <select id="price-symbol" style="flex:1"><option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option><option>AUDUSD</option><option>USDCAD</option><option>XAUUSD</option><option>GOLD</option><option>BTCUSD</option><option>US30</option><option>NAS100</option><option>SPX500</option></select>
+            <select id="chart-timeframe"><option value="1">1m</option><option value="5">5m</option><option value="15" selected>15m</option><option value="60">1h</option><option value="240">4h</option></select>
+          </div>
+          <div class="chart-container">
+            <div id="price-chart"></div>
           </div>
           <div id="price-display" class="price-card">
-            <p style="color:var(--text-faint)">Select symbol and refresh</p>
+            <p style="color:var(--text-faint)">Select symbol and click Refresh</p>
           </div>
           <div class="quick-grid">
             <button class="btn btn-outline-green btn-sm" onclick="quickTrade('buy',0.01)">Buy 0.01</button>
@@ -350,6 +365,14 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
               <input id="tp" type="number" placeholder="Optional">
             </div>
           </div>
+          <div class="form-group" style="margin-top:8px">
+            <label>Auto SL/TP (pips from price)</label>
+            <div style="display:flex;gap:8px">
+              <input id="sltp-pips" type="number" value="10" min="1" max="500" style="width:80px">
+              <button class="btn btn-ghost btn-sm" onclick="if(lastAutoPrice) autoFillSLTP(lastAutoPrice.bid, lastAutoPrice.ask, lastAutoPrice.symbol)" style="flex:1">Apply to Current Price</button>
+            </div>
+            <small style="color:var(--text-faint);font-size:11px">Fetch price first, then click Apply</small>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
             <button class="btn btn-success" onclick="placeTrade('buy')" style="width:100%;padding:12px">BUY</button>
             <button class="btn btn-danger" onclick="placeTrade('sell')" style="width:100%;padding:12px">SELL</button>
@@ -361,6 +384,36 @@ select{cursor:pointer;-webkit-appearance:none;appearance:none;background-image:u
             <button class="btn btn-outline-red btn-xs" onclick="placeTrade('sell',0.1)">Sell 0.1</button>
           </div>
           <div id="trade-result" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Place Pending Order</span>
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="order-type">
+              <option value="buylimit">Buy Limit</option>
+              <option value="selllimit">Sell Limit</option>
+              <option value="buystop">Buy Stop</option>
+              <option value="sellstop">Sell Stop</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Price</label>
+            <input id="order-price" type="number" placeholder="Enter trigger price">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group">
+              <label>Stop Loss</label>
+              <input id="order-sl" type="number" placeholder="Optional">
+            </div>
+            <div class="form-group">
+              <label>Take Profit</label>
+              <input id="order-tp" type="number" placeholder="Optional">
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="placePendingOrder()" style="width:100%;margin-top:8px">Place Pending Order</button>
+          <div id="order-result" style="margin-top:8px"></div>
         </div>
         <div class="card">
           <div class="card-header">
@@ -566,6 +619,30 @@ function escapeHtml(value) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c];
   });
 }
+
+// Auto-fill SL/TP based on current price
+var lastAutoPrice = null;
+function autoFillSLTP(bid, ask, symbol) {
+  lastAutoPrice = { bid: parseFloat(bid), ask: parseFloat(ask), symbol: symbol };
+  
+  // SL/TP distance in pips (adjustable)
+  var pipDistance = parseInt(byId('sltp-pips') ? byId('sltp-pips').value : 10);
+  
+  // Determine pip size based on symbol
+  var pipSize = symbol === 'XAUUSD' || symbol === 'GOLD' || symbol === 'BTCUSD' ? 0.01 : 0.0001;
+  var multiplier = symbol === 'XAUUSD' || symbol === 'GOLD' || symbol === 'BTCUSD' || symbol === 'US30' || symbol === 'NAS100' || symbol === 'SPX500' ? 100 : 100000;
+  
+  var slDistance = pipDistance * pipSize;
+  var tpDistance = pipDistance * pipSize;
+  
+  // For trading panel
+  if (byId('sl')) {
+    // Sell order (using bid for SL, ask for TP)
+    byId('sl').value = (bid - slDistance).toFixed(5);
+    byId('tp').value = (ask + tpDistance).toFixed(5);
+  }
+}
+
 function fmtMoney(v) {
   var num = Number(v || 0);
   return '$' + num.toFixed(2);
@@ -624,6 +701,13 @@ function clearLog() {
   renderActivityLog();
 }
 
+// ===== APP INIT =====
+function initApp() {
+  initChart();
+  loadApiKeys();
+}
+
+// ===== API FETCH =====
 async function apiFetch(path, options) {
   var opts = options || {};
   var method = (opts.method || 'GET').toUpperCase();
@@ -780,6 +864,83 @@ async function saveSettings() {
   }
 }
 
+// ===== PRICE CHART =====
+var priceChart = null;
+var candleSeries = null;
+var lineSeries = null;
+var priceData = [];
+
+function initChart() {
+  if (typeof window.lightweightCharts === 'undefined') {
+    console.log('Chart library not loaded yet');
+    setTimeout(initChart, 500);
+    return;
+  }
+  
+  var container = document.getElementById('price-chart');
+  if (!container) return;
+  
+  priceChart = window.lightweightCharts.createChart(container, {
+    layout: {
+      background: { color: '#1a1a25' },
+      textColor: '#8888a0'
+    },
+    grid: {
+      vertLines: { color: '#2a2a3a' },
+      horzLines: { color: '#2a2a3a' }
+    },
+    width: container.clientWidth,
+    height: 200,
+    timeScale: {
+      borderColor: '#2a2a3a',
+      timeVisible: true
+    },
+    crosshair: {
+      mode: window.lightweightCharts.CrosshairMode.Normal
+    }
+  });
+  
+  candleSeries = priceChart.addCandlestickSeries({
+    upColor: '#00d4aa',
+    downColor: '#ff4757',
+    borderUpColor: '#00d4aa',
+    borderDownColor: '#ff4757',
+    wickUpColor: '#00d4aa',
+    wickDownColor: '#ff4757'
+  });
+  
+  lineSeries = priceChart.addLineSeries({
+    color: '#38bdf8',
+    lineWidth: 2
+  });
+  
+  window.addEventListener('resize', () => {
+    if (priceChart && container) {
+      priceChart.applyOptions({ width: container.clientWidth });
+    }
+  });
+}
+
+function updateChart(symbol, candles) {
+  if (!candleSeries || !candles || candles.length === 0) return;
+  
+  var chartData = candles.map(c => ({
+    time: Math.floor(new Date(c.time).getTime() / 1000),
+    open: parseFloat(c.open),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    close: parseFloat(c.close)
+  }));
+  
+  candleSeries.setData(chartData);
+  priceChart.timeScale().fitContent();
+}
+
+function addPriceMarker(price, side) {
+  if (!lineSeries) return;
+  lineSeries.update({ time: Math.floor(Date.now() / 1000), value: price });
+}
+
 // ===== DASHBOARD =====
 async function fetchHealth() {
   try {
@@ -821,16 +982,31 @@ async function fetchAccount() {
 // ===== LIVE PRICE =====
 async function getPrice() {
   var sym = byId('price-symbol').value;
+  var timeframe = byId('chart-timeframe') ? byId('chart-timeframe').value : '15';
   var display = byId('price-display');
   display.innerHTML = '<p style="color:var(--text-faint)">Loading ' + escapeHtml(sym) + '...</p>';
+  
   try {
-    var d = await apiFetch('/api/price/' + encodeURIComponent(sym));
+    // Fetch price and candles in parallel
+    var [d, candles] = await Promise.all([
+      apiFetch('/api/price/' + encodeURIComponent(sym)),
+      apiFetch('/api/candles/' + encodeURIComponent(sym) + '?timeframe=' + timeframe + '&count=100')
+    ]);
+    
     var spread = d.spread || (d.ask && d.bid ? ((d.ask - d.bid) * 100000).toFixed(1) : 'N/A');
     display.innerHTML =
       '<div class="price-row"><div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">BID</div><span class="price-bid">' + escapeHtml(d.bid) + '</span></div>' +
       '<div class="price-divider"></div>' +
       '<div><div style="font-size:11px;color:var(--text-faint);margin-bottom:2px">ASK</div><span class="price-ask">' + escapeHtml(d.ask) + '</span></div></div>' +
-      '<div class="price-spread">Spread: ' + escapeHtml(spread) + ' · ' + escapeHtml(sym) + '</div>';
+      '<div class="price-spread">Spread: ' + escapeHtml(spread) + ' · ' + escapeHtml(sym) + ' · ' + escapeHtml(timeframe) + 'm</div>';
+    
+    // Update chart
+    if (candles && candles.length > 0) {
+      updateChart(sym, candles);
+    }
+    
+    // Auto-fill SL/TP based on current price
+    autoFillSLTP(d.bid, d.ask, sym);
   } catch (error) {
     display.innerHTML = '<p style="color:var(--red)">' + escapeHtml(error.message) + '</p>';
   }
@@ -849,6 +1025,19 @@ async function placeTrade(type, volumeOverride) {
     return;
   }
 
+  // Trade confirmation dialog
+  var slText = sl ? sl.toFixed(5) : 'None';
+  var tpText = tp ? tp.toFixed(5) : 'None';
+  var confirmMsg = 'Confirm Trade\n\n' +
+    type.toUpperCase() + ' ' + volume + ' ' + symbol + '\n' +
+    'Stop Loss: ' + slText + '\n' +
+    'Take Profit: ' + tpText;
+  
+  if (!confirm(confirmMsg)) {
+    resultEl.innerHTML = '<span style="color:var(--text-faint)">Trade cancelled.</span>';
+    return;
+  }
+
   resultEl.innerHTML = '<span style="color:var(--text-faint)">Submitting...</span>';
   try {
     await apiFetch('/api/trade', {
@@ -864,12 +1053,45 @@ async function placeTrade(type, volumeOverride) {
   }
 }
 
+// ===== PENDING ORDERS =====
+async function placePendingOrder() {
+  var symbol = byId('symbol').value;
+  var orderType = byId('order-type').value;
+  var price = byId('order-price').value ? parseFloat(byId('order-price').value) : null;
+  var volume = parseFloat(byId('volume').value) || 0.01;
+  var sl = byId('order-sl').value ? parseFloat(byId('order-sl').value) : undefined;
+  var tp = byId('order-tp').value ? parseFloat(byId('order-tp').value) : undefined;
+  var resultEl = byId('order-result');
+  
+  if (!price || price <= 0) {
+    resultEl.innerHTML = '<span class="loss">Price is required.</span>';
+    return;
+  }
+  
+  resultEl.innerHTML = '<span style="color:var(--text-faint)">Submitting...</span>';
+  try {
+    await apiFetch('/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, type: orderType, volume, price, stopLoss: sl, takeProfit: tp })
+    });
+    resultEl.innerHTML = '<span class="profit" style="font-weight:600">✓ Pending order placed!</span>';
+    byId('order-price').value = '';
+    byId('order-sl').value = '';
+    byId('order-tp').value = '';
+    await fetchOrders();
+  } catch (error) {
+    resultEl.innerHTML = '<span class="loss">' + escapeHtml(error.message) + '</span>';
+  }
+}
+
 function quickTrade(type, vol) {
   byId('symbol').value = byId('price-symbol').value;
   return placeTrade(type, vol);
 }
 
 async function closePos(id) {
+  if (!confirm('Close this position?')) return;
   try {
     await apiFetch('/api/close/' + encodeURIComponent(id), { method: 'POST' });
     await fetchPositions();

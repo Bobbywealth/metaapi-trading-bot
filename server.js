@@ -4,12 +4,45 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+const { WebSocketServer } = require('ws');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
+// ===== RATE LIMITING =====
+const readLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'RATE_LIMIT_EXCEEDED', message: 'Read limit: 60 requests/minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const tradeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'RATE_LIMIT_EXCEEDED', message: 'Trade limit: 10 requests/minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const keyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'RATE_LIMIT_EXCEEDED', message: 'Key management limit: 10 requests/minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Apply rate limiters to routes
+app.use('/api/', readLimiter); // Default for all /api routes
+app.use('/api/trade', tradeLimiter);
+app.use('/api/close', tradeLimiter);
+app.use('/api/keys', keyLimiter);
 
 // ===== API KEYS — PERSISTENT STORAGE =====
 // Primary: /var/data (persistent disk on paid Render plans)
@@ -757,6 +790,21 @@ app.get('/api/docs', (req, res) => {
 });
 
 // ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PUBLIC HEALTH CHECK (no auth required)
+// ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    connected,
+    metaApiConfigured: !!(runtimeToken && runtimeAccountId),
+    server: account?.server || null,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // PROTECTED ROUTES (require API key)
 // ===== ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -811,6 +859,19 @@ app.get('/api/symbols', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Candles/candlestick data for charts
+app.get('/api/candles/:symbol', requireApiKey, async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
+  try {
+    const symbol = resolveSymbol(req.params.symbol);
+    const timeframe = req.query.timeframe || '15'; // minutes
+    const count = parseInt(req.query.count) || 100;
+    
+    const candles = await connection.getCandles(symbol, timeframe, count);
+    res.json(candles);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/price/:symbol', requireApiKey, async (req, res) => {
   if (!connected) return res.status(503).json({ error: 'Not connected' });
   try {
@@ -861,9 +922,56 @@ app.post('/api/trade', requireApiKey, async (req, res) => {
   }
 });
 
+// ===== PENDING ORDERS (Limit/Stop) =====
+app.post('/api/order', requireApiKey, async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
+  try {
+    const { symbol, type, volume, price, stopLoss, takeProfit } = req.body;
+    const vol = parseFloat(volume);
+    const p = parseFloat(price);
+    
+    if (!symbol || !type || isNaN(vol) || vol <= 0 || isNaN(p) || p <= 0) {
+      return res.status(400).json({ error: 'Invalid order parameters. Required: symbol, type (buylimit/selllimit/buystop/sellstop), volume, price' });
+    }
+    
+    const sl = stopLoss ? parseFloat(stopLoss) : undefined;
+    const tp = takeProfit ? parseFloat(takeProfit) : undefined;
+    const resolved = resolveSymbol(symbol);
+    let result;
+    
+    switch (type.toLowerCase()) {
+      case 'buylimit':
+        result = await connection.createLimitBuyOrder(resolved, vol, p, sl, tp);
+        break;
+      case 'selllimit':
+        result = await connection.createLimitSellOrder(resolved, vol, p, sl, tp);
+        break;
+      case 'buystop':
+        result = await connection.createStopBuyOrder(resolved, vol, p, sl, tp);
+        break;
+      case 'sellstop':
+        result = await connection.createStopSellOrder(resolved, vol, p, sl, tp);
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid type. Use: buylimit, selllimit, buystop, sellstop' });
+    }
+    
+    logApiEvent('order_created', req.apiKeyId, `${type.toUpperCase()} ${vol} ${symbol} @ ${p} via API key: ${req.apiKeyLabel}`);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/close/:positionId', requireApiKey, async (req, res) => {
   if (!connected) return res.status(503).json({ error: 'Not connected' });
   try { res.json(await connection.closePosition(req.params.positionId)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/order/:orderId', requireApiKey, async (req, res) => {
+  if (!connected) return res.status(503).json({ error: 'Not connected' });
+  try { res.json(await connection.cancelOrder(req.params.orderId)); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -962,9 +1070,71 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// ===== WEBSOCKET SERVER =====
+let wss = null;
+let wsClients = new Set();
+
+function initWebSocket(server) {
+  wss = new WebSocketServer({ server });
+  
+  wss.on('connection', (ws) => {
+    wsClients.add(ws);
+    console.log('WebSocket client connected. Total:', wsClients.size);
+    
+    ws.on('close', () => {
+      wsClients.delete(ws);
+      console.log('WebSocket client disconnected. Total:', wsClients.size);
+    });
+    
+    ws.on('error', (err) => {
+      console.log('WebSocket error:', err.message);
+      wsClients.delete(ws);
+    });
+    
+    // Send initial connection confirmation
+    ws.send(JSON.stringify({ type: 'connected', timestamp: Date.now() }));
+  });
+  
+  console.log('WebSocket server initialized');
+}
+
+function broadcastPrice(symbol, bid, ask) {
+  if (wss && wsClients.size > 0) {
+    const message = JSON.stringify({
+      type: 'price',
+      symbol,
+      bid,
+      ask,
+      spread: ask && bid ? ((ask - bid) * 100000).toFixed(1) : null,
+      timestamp: Date.now()
+    });
+    wsClients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+}
+
+function broadcastPositionUpdate(positions) {
+  if (wss && wsClients.size > 0) {
+    const message = JSON.stringify({
+      type: 'positions',
+      positions,
+      timestamp: Date.now()
+    });
+    wsClients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+}
+
 // ===== START SERVER =====
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log('Trading bot running on port ' + PORT);
+  initWebSocket(server);
 });
 
 // ===== AUTO-INIT FROM ENV (runs after server is listening) =====
