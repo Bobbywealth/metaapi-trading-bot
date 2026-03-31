@@ -962,10 +962,14 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ===== AUTO-INIT FROM ENV =====
-app.listen(PORT, async () => {
+// ===== START SERVER =====
+app.listen(PORT, () => {
   console.log('Trading bot running on port ' + PORT);
-    // Seed default dashboard API key from env var
+});
+
+// ===== AUTO-INIT FROM ENV (runs after server is listening) =====
+(async () => {
+  // Seed default dashboard API key from env var
   const defaultKey = process.env.DEFAULT_API_KEY;
   if (defaultKey) {
     const keys = loadApiKeys();
@@ -976,6 +980,7 @@ app.listen(PORT, async () => {
       console.log('Default API key seeded from env.');
     }
   }
+
   const envToken = process.env.META_API_TOKEN;
   const envAccountId = process.env.META_API_ACCOUNT_ID;
   const envJournalPath = process.env.JOURNAL_FILE;
@@ -986,4 +991,4 @@ app.listen(PORT, async () => {
   } else {
     console.log('No env vars — use Settings to configure API keys.');
   }
-});
+})();
