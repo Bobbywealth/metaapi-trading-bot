@@ -29,7 +29,16 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { font-size: 14px; -webkit-font-smoothing: antialiased; }
     body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: var(--text-primary); line-height: 1.5; min-height: 100vh; }
-    .header { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-default); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 100; }
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar { width: 220px; background: var(--bg-secondary); border-right: 1px solid var(--border-default); padding: 16px 0; position: fixed; top: 0; left: 0; bottom: 0; overflow-y: auto; }
+    .nav-section { margin-bottom: 24px; }
+    .nav-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; padding: 0 16px; margin-bottom: 8px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; color: var(--text-secondary); cursor: pointer; transition: all var(--transition); border-left: 3px solid transparent; }
+    .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .nav-item.active { background: rgba(88, 166, 255, 0.1); color: var(--accent-blue); border-left-color: var(--accent-blue); }
+    .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-item span { font-size: 0.875rem; font-weight: 500; }
+    .header { height: 56px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-default); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; margin-left: 220px; }
     .logo { display: flex; align-items: center; gap: 8px; color: var(--accent-blue); font-weight: 600; font-size: 1rem; }
     .logo svg { width: 24px; height: 24px; }
     .status { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
@@ -38,7 +47,7 @@
     .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
     .connected .status-dot { animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .main { margin-top: 56px; padding: 24px; max-width: 1400px; margin-left: auto; margin-right: auto; }
+    .main { flex: 1; margin-left: 220px; padding: 24px; max-width: 1400px; }
     .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
     .kpi { background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: var(--radius); padding: 16px; }
     .kpi-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
@@ -104,18 +113,63 @@
   </style>
 </head>
 <body>
-  <header class="header">
-    <div class="logo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
-      AI Trading Station
-    </div>
-    <div class="status disconnected" id="conn-status">
-      <span class="status-dot"></span>
-      <span id="conn-text">Offline</span>
-    </div>
-  </header>
-  
-  <main class="main">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="nav-section">
+        <div class="nav-label">Main</div>
+        <div class="nav-item active" data-page="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-page="trading">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+          <span>Trading</span>
+        </div>
+        <div class="nav-item" data-page="positions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+          <span>Positions</span>
+        </div>
+        <div class="nav-item" data-page="strategies">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Strategies</span>
+        </div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Tools</div>
+        <div class="nav-item" data-page="journal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>Journal</span>
+        </div>
+        <div class="nav-item" data-page="news">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1"/><path d="M21 9h-6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V11a2 2 0 0 0-2-2z"/><path d="M7 6h2"/></svg>
+          <span>News</span>
+        </div>
+        <div class="nav-item" data-page="analytics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21H3V3"/><path d="M18 9l-5 5-4-4-6 6"/></svg>
+          <span>Analytics</span>
+        </div>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">System</div>
+        <div class="nav-item" data-page="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
+        </div>
+      </div>
+    </aside>
+    
+    <header class="header">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+        AI Trading Station
+      </div>
+      <div class="status disconnected" id="conn-status">
+        <span class="status-dot"></span>
+        <span id="conn-text">Offline</span>
+      </div>
+    </header>
+    
+    <main class="main">
     <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-label">Balance</div>
@@ -376,5 +430,6 @@
     generateOrderBook();
     setInterval(generateOrderBook, 5000);
   </script>
+  </div>
 </body>
 </html>
