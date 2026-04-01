@@ -1,0 +1,243 @@
+.trading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-lg);
+}
+
+.cardTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--space-lg);
+}
+
+.symbolSelect select {
+  width: 100%;
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--space-lg);
+}
+
+.priceDisplay {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.priceBox {
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.priceLabel {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--space-xs);
+}
+
+.bidPrice, .askPrice {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.bidPrice { color: var(--accent-green); }
+.askPrice { color: var(--accent-red); }
+
+.sideToggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.sideBtn {
+  padding: var(--space-md);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.buyBtn {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--accent-green);
+}
+
+.buyBtn.active {
+  background: var(--accent-green);
+  color: black;
+}
+
+.sellBtn {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--accent-red);
+}
+
+.sellBtn.active {
+  background: var(--accent-red);
+  color: white;
+}
+
+.formGroup {
+  margin-bottom: var(--space-md);
+}
+
+.formGroup label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.formGroup input {
+  width: 100%;
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+.submitBtn {
+  width: 100%;
+  padding: var(--space-lg);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: var(--space-md);
+}
+
+.buySubmit {
+  background: var(--accent-green);
+  color: black;
+}
+
+.buySubmit:hover {
+  background: #4ade80;
+  box-shadow: var(--shadow-glow-green);
+}
+
+.sellSubmit {
+  background: var(--accent-red);
+  color: white;
+}
+
+.sellSubmit:hover {
+  background: #f87171;
+  box-shadow: var(--shadow-glow-red);
+}
+
+.quickButtons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+.quickBtn {
+  padding: var(--space-lg);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.quickBtn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--accent-blue);
+}
+
+.quickLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.orderBook {
+  grid-row: span 2;
+}
+
+.bookHeader {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.bookAsks, .bookBids {
+  display: flex;
+  flex-direction: column;
+}
+
+.bookRow {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-xs) 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.askRow { color: var(--accent-red); }
+.bidRow { color: var(--accent-green); }
+.volumeRow { color: var(--text-muted); }
+
+.spread {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: var(--space-sm) 0;
+}
+
+@media (max-width: 1200px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .orderBook {
+    grid-column: 1 / 3;
+  }
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .orderBook {
+    grid-column: 1;
+  }
+}

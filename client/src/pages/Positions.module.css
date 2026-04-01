@@ -1,0 +1,26 @@
+.container { display: flex; flex-direction: column; gap: var(--space-xl); }
+.header { display: flex; align-items: center; justify-content: space-between; }
+.header h2 { font-size: 1.25rem; }
+.count { font-size: 0.875rem; color: var(--text-secondary); }
+.empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-md); padding: var(--space-3xl); text-align: center; }
+.empty svg { width: 64px; height: 64px; color: var(--text-muted); }
+.empty h3 { font-size: 1rem; color: var(--text-primary); }
+.empty p { font-size: 0.875rem; color: var(--text-muted); }
+.list { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--space-lg); }
+.positionCard { padding: var(--space-lg); }
+.positionHeader { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-lg); }
+.symbol { display: flex; align-items: center; gap: var(--space-md); }
+.symbolName { font-size: 1.125rem; font-weight: 700; }
+.type { padding: 2px 8px; border-radius: 4px; font-size: 0.6875rem; font-weight: 600; }
+.type.long { background: rgba(63, 185, 80, 0.15); color: var(--accent-green); }
+.type.short { background: rgba(248, 81, 73, 0.15); color: var(--accent-red); }
+.pnl { font-size: 1.25rem; font-weight: 700; font-family: var(--font-mono); }
+.pnl.profit { color: var(--accent-green); }
+.pnl.loss { color: var(--accent-red); }
+.details { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); margin-bottom: var(--space-lg); }
+.detail { display: flex; justify-content: space-between; font-size: 0.8125rem; }
+.detail span:first-child { color: var(--text-muted); }
+.detail span:last-child { font-family: var(--font-mono); }
+.closeBtn { width: 100%; padding: var(--space-md); background: rgba(248, 81, 73, 0.15); border: 1px solid var(--accent-red); border-radius: var(--radius-md); color: var(--accent-red); font-size: 0.8125rem; font-weight: 600; cursor: pointer; transition: all var(--transition-fast); }
+.closeBtn:hover { background: var(--accent-red); color: white; }
+@media (max-width: 768px) { .list { grid-template-columns: 1fr; } }

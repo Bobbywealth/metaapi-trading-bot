@@ -1,0 +1,29 @@
+.container { display: flex; flex-direction: column; gap: var(--space-xl); }
+.container h2 { font-size: 1.25rem; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xl); }
+.section { padding: var(--space-xl); }
+.section h3 { font-size: 1rem; margin-bottom: var(--space-xl); }
+.form { display: flex; flex-direction: column; gap: var(--space-lg); }
+.field { display: flex; flex-direction: column; gap: var(--space-sm); }
+.field label { font-size: 0.75rem; color: var(--text-secondary); }
+.field input { padding: var(--space-md); background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.875rem; }
+.field input:focus { border-color: var(--accent-blue); outline: none; }
+.field input:disabled { opacity: 0.6; cursor: not-allowed; }
+.actions { margin-top: var(--space-md); }
+.connect, .disconnect { padding: var(--space-md) var(--space-xl); border: none; border-radius: var(--radius-md); font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: all var(--transition-fast); }
+.connect { background: var(--accent-green); color: black; }
+.connect:hover { background: #4ade80; }
+.disconnect { background: var(--accent-red); color: white; }
+.disconnect:hover { background: #f87171; }
+.status { display: flex; align-items: center; gap: var(--space-sm); margin-top: var(--space-xl); font-size: 0.8125rem; color: var(--text-secondary); }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.connected { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+.disconnected { background: var(--accent-red); }
+.pref { display: flex; justify-content: space-between; align-items: center; padding: var(--space-md) 0; border-bottom: 1px solid var(--border-subtle); }
+.pref:last-child { border-bottom: none; }
+.pref span { font-size: 0.875rem; }
+.toggle { width: 44px; height: 24px; background: var(--bg-tertiary); border: none; border-radius: 12px; cursor: pointer; position: relative; transition: background var(--transition-fast); }
+.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: var(--text-muted); border-radius: 50%; transition: all var(--transition-fast); }
+.toggle.on { background: var(--accent-green); }
+.toggle.on::after { left: 22px; background: white; }
+@media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }

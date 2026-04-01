@@ -1,0 +1,38 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg-primary);
+}
+
+.main {
+  flex: 1;
+  margin-left: var(--sidebar-width);
+  margin-top: var(--topbar-height);
+  margin-bottom: var(--bottomnav-height);
+  min-height: calc(100vh - var(--topbar-height) - var(--bottomnav-height));
+  transition: margin-left var(--transition-base);
+}
+
+.content {
+  padding: var(--space-xl);
+  max-width: 1600px;
+  margin: 0 auto;
+  animation: fadeIn var(--transition-base) ease;
+}
+
+@media (max-width: 768px) {
+  .main {
+    margin-left: 0;
+    margin-bottom: calc(var(--bottomnav-height) + var(--space-md));
+  }
+  
+  .content {
+    padding: var(--space-lg);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
